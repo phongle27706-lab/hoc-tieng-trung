@@ -131,10 +131,10 @@ export function RoadmapClient() {
     STARTING_LEVEL_OPTIONS[0];
 
   return (
-    <StaggerContainer className="mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-6">
+    <StaggerContainer className="mx-auto w-full max-w-4xl min-w-0 space-y-6 overflow-x-hidden px-4 py-8 sm:px-6">
       {/* Minimalist Page Header */}
-      <StaggerItem className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+      <StaggerItem className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-wider text-[#737373]">
             Lộ trình 10 Chặng · Mức 0 (HSK0) → HSK 9
           </p>

@@ -168,7 +168,7 @@ export default function TranslationPage() {
   const [subFilter, setSubFilter] = useState<SubFilter>("all");
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [userInput, setUserInput] = useState<string>("");
-  const [showPinyin, setShowPinyin] = useState<boolean>(true);
+  const [showPinyin, setShowPinyin] = useState<boolean>(false);
   const [showKeywordHints, setShowKeywordHints] = useState<boolean>(true);
   const [showReference, setShowReference] = useState<boolean>(false);
   const [evalResult, setEvalResult] =

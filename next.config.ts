@@ -7,7 +7,7 @@ const ContentSecurityPolicy = [
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' data: blob: https:",
   "frame-src https://www.youtube-nocookie.com https://www.youtube.com",
-  "connect-src 'self' https://generativelanguage.googleapis.com https://api.openai.com",
+  "connect-src 'self' https://generativelanguage.googleapis.com https://api.openai.com https://cdn.jsdelivr.net",
   "object-src 'none'",
   "base-uri 'self'",
   "frame-ancestors 'self'",

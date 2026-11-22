@@ -10,7 +10,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Flame,
-  FolderOpen,
   GraduationCap,
   Headphones,
   Layers,
@@ -282,7 +281,7 @@ export function DashboardView() {
     return activityItems.filter((item) => item.type === activityFilter);
   }, [activityItems, activityFilter]);
 
-  const srsDueCount = Math.max(savedVocabCount > 0 ? Math.min(savedVocabCount, 12) : 0, 5);
+  const srsDueCount = savedVocabCount > 0 ? Math.min(savedVocabCount, 12) : 0;
 
   return (
     <div className="mx-auto max-w-6xl pb-10">
@@ -550,7 +549,7 @@ export function DashboardView() {
                 </div>
               </div>
 
-              {/* 2 mini stat boxes: Đã xong / Đang học */}
+              {/* 2 mini stat boxes: Đã xong / Còn lại */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-2xl border border-[#E5E5E0] bg-[#F2F2F0] p-3.5">
                   <div className="text-[11px] font-medium text-[#6B655E]">Đã xong</div>
@@ -559,7 +558,7 @@ export function DashboardView() {
                   </div>
                 </div>
                 <div className="rounded-2xl border border-[#E5E5E0] bg-[#F2F2F0] p-3.5">
-                  <div className="text-[11px] font-medium text-[#6B655E]">Đang học</div>
+                  <div className="text-[11px] font-medium text-[#6B655E]">Còn lại</div>
                   <div className="mt-1 text-lg font-bold text-[#262626]">
                     {remainingCount} buổi
                   </div>

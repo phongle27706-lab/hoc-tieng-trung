@@ -23,7 +23,25 @@ export interface ReadingPassage {
   questions: ReadingQuestion[];
 }
 
-export const READING_PASSAGES: ReadingPassage[] = [
+const HSK_ORDER: Record<HSKLevel, number> = {
+  HSK0: 0,
+  HSK1: 1,
+  HSK2: 2,
+  HSK3: 3,
+  HSK4: 4,
+  HSK5: 5,
+  HSK6: 6,
+  HSK7: 7,
+  HSK8: 8,
+  HSK9: 9,
+};
+
+const SUB_DIFFICULTY_ORDER: Record<SubDifficulty, number> = {
+  basic: 0,
+  advanced: 1,
+};
+
+const RAW_READING_PASSAGES: ReadingPassage[] = [
   {
     "id": "rp-hsk0-basic-1",
     "level": "HSK0",
@@ -2542,3 +2560,9 @@ export const READING_PASSAGES: ReadingPassage[] = [
   },
   ...READING_PASSAGES_EXTRA
 ];
+
+export const READING_PASSAGES: ReadingPassage[] = [...RAW_READING_PASSAGES].sort((a, b) => {
+  const levelDiff = (HSK_ORDER[a.level] ?? 99) - (HSK_ORDER[b.level] ?? 99);
+  if (levelDiff !== 0) return levelDiff;
+  return (SUB_DIFFICULTY_ORDER[a.subDifficulty] ?? 99) - (SUB_DIFFICULTY_ORDER[b.subDifficulty] ?? 99);
+});

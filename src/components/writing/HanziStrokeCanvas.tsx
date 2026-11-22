@@ -13,6 +13,7 @@ import {
   Wand2,
 } from "lucide-react";
 import * as writingModule from "@/data/chinese/writing";
+import { lookupChineseSync } from "@/data/chinese/dictionary";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { TACTILE_SPRING } from "@/components/ui/MotionPrimitives";
@@ -53,6 +54,195 @@ interface StrokeErrorFeedback {
 }
 
 const CANVAS_SIZE = 300;
+
+interface HanziWriterCharData {
+  strokes: string[];
+  medians: number[][][];
+}
+
+const hanziDataCache = new Map<string, HanziWriterCharData>();
+
+function clampNorm(v: number, min = 6, max = 94): number {
+  return Math.max(min, Math.min(max, v));
+}
+
+function normalizeMedianPoints(median: number[][]): [number, number][] {
+  return median.map(([x, y]) => [
+    clampNorm((x / 1024) * 100),
+    clampNorm(((900 - y) / 1024) * 100),
+  ]);
+}
+
+function classifyStrokeFromPoints(points: [number, number][]): {
+  nameVi: string;
+  ruleVi: string;
+} {
+  if (points.length < 2) {
+    return {
+      nameVi: "Nét Chấm (点 - Diǎn)",
+      ruleVi: "Chấm gọn, nhấn nhẹ ở cuối nét.",
+    };
+  }
+
+  const start = points[0];
+  const end = points[points.length - 1];
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const directDist = Math.hypot(dx, dy);
+
+  let totalLen = 0;
+  for (let i = 1; i < points.length; i++) {
+    totalLen += Math.hypot(
+      points[i][0] - points[i - 1][0],
+      points[i][1] - points[i - 1][1]
+    );
+  }
+
+  // Detect hooks (Móc) or turns (Gập) when path has >= 3 points
+  if (points.length >= 3) {
+    const mid = points[Math.floor(points.length / 2)];
+    const v1x = mid[0] - start[0];
+    const v1y = mid[1] - start[1];
+    const v2x = end[0] - mid[0];
+    const v2y = end[1] - mid[1];
+    const len1 = Math.hypot(v1x, v1y);
+    const len2 = Math.hypot(v2x, v2y);
+
+    if (len1 > 6 && len2 > 4) {
+      const cosAngle = (v1x * v2x + v1y * v2y) / (len1 * len2);
+      // Sharp turn (> ~60 degrees)
+      if (cosAngle < 0.5) {
+        const lastPrev = points[points.length - 2];
+        const lastDx = end[0] - lastPrev[0];
+        const lastDy = end[1] - lastPrev[1];
+        const lastLen = Math.hypot(lastDx, lastDy);
+        if (lastLen < 16 && lastDy < -2) {
+          return {
+            nameVi: "Nét Móc (钩 - Gōu)",
+            ruleVi: "Kéo nét chính rồi bật móc gọn ở cuối nét.",
+          };
+        }
+        return {
+          nameVi: "Nét Gập (折 - Zhé)",
+          ruleVi: "Viết liền mạch qua điểm gập, không nhấc bút.",
+        };
+      }
+    }
+  }
+
+  if (totalLen < 16 || directDist < 14) {
+    return {
+      nameVi: "Nét Chấm (点 - Diǎn)",
+      ruleVi: "Chấm gọn, nhấn nhẹ ở cuối nét.",
+    };
+  }
+
+  if (Math.abs(dx) >= Math.abs(dy) * 1.8) {
+    if (dx > 0 && dy < -4) {
+      return {
+        nameVi: "Nét Hất (提 - Tí)",
+        ruleVi: "Hất nhanh từ dưới trái lên trên phải.",
+      };
+    }
+    return {
+      nameVi: "Nét Ngang (横 - Héng)",
+      ruleVi: "Viết từ trái sang phải, hơi chếch nhẹ lên trên.",
+    };
+  }
+
+  if (Math.abs(dy) >= Math.abs(dx) * 1.8 && dy > 0) {
+    return {
+      nameVi: "Nét Sổ (竖 - Shù)",
+      ruleVi: "Kéo thẳng từ trên xuống dưới.",
+    };
+  }
+
+  if (dx < -4 && dy > 4) {
+    return {
+      nameVi: "Nét Phẩy (撇 - Piě)",
+      ruleVi: "Đặt bút rồi kéo vuốt nhẹ xuống góc trái dưới.",
+    };
+  }
+
+  if (dx > 4 && dy > 4) {
+    return {
+      nameVi: "Nét Mác (捺 - Nà)",
+      ruleVi: "Kéo từ trên trái xuống dưới phải, nhấn nhẹ ở chân nét.",
+    };
+  }
+
+  return {
+    nameVi: "Nét Ngang (横 - Héng)",
+    ruleVi: "Viết liền mạch theo thứ tự từ trên xuống dưới, trái sang phải.",
+  };
+}
+
+function resolveCharMetadata(
+  char: string,
+  pinyinHint?: string,
+  meaningHint?: string
+): {
+  pinyin: string;
+  meaningVi: string;
+  radical: string;
+  level: HSKLevel;
+  subDifficulty: SubDifficulty;
+} {
+  const bankMatch = Array.isArray(writingModule.HANZI_STROKE_BANK)
+    ? writingModule.HANZI_STROKE_BANK.find((item) => item.hanzi === char)
+    : undefined;
+  const builtin = BUILTIN_TEMPLATES[char];
+  const dictEntry = lookupChineseSync(char);
+
+  const dictPinyin =
+    dictEntry.pinyin && dictEntry.pinyin !== "hàn zì" ? dictEntry.pinyin : "";
+  const dictMeaning =
+    dictEntry.meaningVi && !dictEntry.meaningVi.startsWith("Tra cứu")
+      ? dictEntry.meaningVi
+      : "";
+
+  return {
+    pinyin:
+      pinyinHint ||
+      bankMatch?.pinyin ||
+      builtin?.pinyin ||
+      dictPinyin ||
+      "hàn zì",
+    meaningVi:
+      meaningHint ||
+      bankMatch?.meaningVi ||
+      builtin?.meaningVi ||
+      dictMeaning ||
+      `Chữ Hán "${char}"`,
+    radical: bankMatch?.radical || builtin?.radical || `Chữ ${char}`,
+    level: bankMatch?.level || builtin?.level || dictEntry.level || "HSK1",
+    subDifficulty: bankMatch?.subDifficulty || builtin?.subDifficulty || "basic",
+  };
+}
+
+function buildTemplateFromHanziData(
+  char: string,
+  data: HanziWriterCharData,
+  pinyinHint?: string,
+  meaningHint?: string
+): HanziStrokeTemplateFallback {
+  const meta = resolveCharMetadata(char, pinyinHint, meaningHint);
+  const strokes: StrokeDescriptor[] = data.medians.map((median, idx) => {
+    const points = normalizeMedianPoints(median);
+    const { nameVi, ruleVi } = classifyStrokeFromPoints(points);
+    return {
+      nameVi: `Nét ${idx + 1}: ${nameVi}`,
+      ruleVi,
+      points,
+    };
+  });
+
+  return {
+    hanzi: char,
+    ...meta,
+    strokes,
+  };
+}
 
 // Built-in fallback templates for common characters + deterministic stroke generator
 const BUILTIN_TEMPLATES: Record<string, HanziStrokeTemplateFallback> = {
@@ -438,10 +628,65 @@ export function HanziStrokeCanvas({
   const [selectedCharIdx, setSelectedCharIdx] = useState(0);
   const activeChar = chars[Math.min(selectedCharIdx, chars.length - 1)] ?? "中";
 
-  const template = useMemo(
-    () => getTemplateSafely(activeChar, pinyin, meaningVi),
-    [activeChar, pinyin, meaningVi]
+  const [hanziData, setHanziData] = useState<HanziWriterCharData | null>(() =>
+    hanziDataCache.get(activeChar) ?? null
   );
+  const [isLoadingData, setIsLoadingData] = useState<boolean>(
+    () => !hanziDataCache.has(activeChar)
+  );
+
+  useEffect(() => {
+    const cached = hanziDataCache.get(activeChar);
+    if (cached) {
+      setHanziData(cached);
+      setIsLoadingData(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingData(true);
+    setHanziData(null);
+
+    fetch(
+      `https://cdn.jsdelivr.net/npm/hanzi-writer-data@2.0/${encodeURIComponent(
+        activeChar
+      )}.json`
+    )
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<HanziWriterCharData>;
+      })
+      .then((data) => {
+        if (
+          !cancelled &&
+          data &&
+          Array.isArray(data.medians) &&
+          data.medians.length > 0
+        ) {
+          hanziDataCache.set(activeChar, data);
+          setHanziData(data);
+        }
+      })
+      .catch(() => {
+        // Fallback to local template if CDN is unreachable
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingData(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeChar]);
+
+  const template = useMemo(() => {
+    if (hanziData) {
+      return buildTemplateFromHanziData(activeChar, hanziData, pinyin, meaningVi);
+    }
+    return getTemplateSafely(activeChar, pinyin, meaningVi);
+  }, [activeChar, hanziData, pinyin, meaningVi]);
 
   const [currentStrokeIdx, setCurrentStrokeIdx] = useState(0);
   const [completedUserStrokes, setCompletedUserStrokes] = useState<
@@ -827,6 +1072,14 @@ export function HanziStrokeCanvas({
             <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-1.5 rounded-lg bg-white/90 px-2.5 py-1 text-[11px] font-semibold text-[#4A4540] shadow-xs backdrop-blur-xs">
               <span>米字格 · Mễ tự cách</span>
             </div>
+
+            {isLoadingData && (
+              <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-white/75 backdrop-blur-[1px]">
+                <div className="rounded-xl border border-[#E5E5E0] bg-white px-3.5 py-2 text-xs font-medium text-[#4A4540] shadow-sm">
+                  Đang tải nét chữ...
+                </div>
+              </div>
+            )}
 
             {/* Audio speaker button on top-right of canvas */}
             <button

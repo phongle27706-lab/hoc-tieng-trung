@@ -288,15 +288,15 @@ export function StageTimeline({
                     return (
                       <div
                         key={session.id}
-                        className={`flex items-center justify-between gap-4 px-5 py-3.5 transition-colors sm:px-6 ${
+                        className={`flex min-w-0 max-w-full items-center justify-between gap-2.5 px-3.5 py-3.5 transition-colors sm:gap-4 sm:px-6 ${
                           isCheckpoint
                             ? "bg-[#FAF9F7] hover:bg-[#F2F2F0]/80"
                             : "hover:bg-[#F2F2F0]/40"
                         }`}
                       >
-                        <div className="flex min-w-0 items-center gap-3.5">
+                        <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:gap-3.5">
                           {/* Number */}
-                          <span className="w-6 shrink-0 font-mono text-xs text-[#737373]">
+                          <span className="hidden w-6 shrink-0 font-mono text-xs text-[#737373] sm:inline-block">
                             {numLabel}
                           </span>
 
@@ -325,17 +325,17 @@ export function StageTimeline({
                           )}
 
                           {/* Title & Chinese / Pinyin */}
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
                               {session.lessonNumber !== undefined && (
                                 <span className="inline-flex shrink-0 items-center rounded-full bg-[#292524] px-2 py-0.5 text-[10px] font-bold text-white">
                                   Bài {session.lessonNumber}
                                 </span>
                               )}
-                              <p className="truncate text-sm font-medium text-[#262626]">
+                              <p className="min-w-0 truncate text-sm font-medium text-[#262626]">
                                 {session.title}
                               </p>
-                              <span className="inline-flex items-center gap-1 rounded-full border border-[#E5E5E0] bg-[#FAF9F7] px-2 py-0.5 text-[10px] font-semibold text-[#4A4540]">
+                              <span className="hidden items-center gap-1 rounded-full border border-[#E5E5E0] bg-[#FAF9F7] px-2 py-0.5 text-[10px] font-semibold text-[#4A4540] sm:inline-flex">
                                 <SkillIcon className="h-3 w-3 text-[#6B655E]" />
                                 {skillMeta.label}
                               </span>
@@ -345,12 +345,12 @@ export function StageTimeline({
                                   : "Nâng cao"}
                               </span>
                               {session.newWords && session.newWords.length > 0 && (
-                                <span className="inline-flex items-center rounded-full border border-[#E5E5E0] bg-white px-2 py-0.5 text-[10px] font-medium text-[#6B655E]">
+                                <span className="hidden items-center rounded-full border border-[#E5E5E0] bg-white px-2 py-0.5 text-[10px] font-medium text-[#6B655E] sm:inline-flex">
                                   {session.newWords.length} từ mới
                                 </span>
                               )}
                               {session.dialogues && session.dialogues.length > 0 && (
-                                <span className="inline-flex items-center rounded-full border border-[#E5E5E0] bg-white px-2 py-0.5 text-[10px] font-medium text-[#6B655E]">
+                                <span className="hidden items-center rounded-full border border-[#E5E5E0] bg-white px-2 py-0.5 text-[10px] font-medium text-[#6B655E] sm:inline-flex">
                                   {session.dialogues.length} bài khóa
                                 </span>
                               )}
@@ -367,7 +367,7 @@ export function StageTimeline({
                         {/* Single Action Button */}
                         <Link
                           href={`/study/${session.id}`}
-                          className={`shrink-0 rounded-lg px-3.5 py-1.5 text-xs font-medium transition-colors ${
+                          className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors sm:px-3.5 ${
                             isCompleted
                               ? "border border-[#E5E5E0] bg-white text-[#262626] hover:bg-[#F2F2F0]"
                               : isCheckpoint

@@ -43,13 +43,13 @@ function getTodayISO(): string {
 }
 
 export const DEFAULT_USER_PROGRESS: UserProgress = {
-  streakDays: 1,
+  streakDays: 0,
   lastActiveDate: getTodayISO(),
   xp: 0,
   dailyXp: 0,
   dailyXpDate: getTodayISO(),
   dailyXpTarget: 50,
-  level: "HSK1",
+  level: "HSK0",
   masteredVocabIds: [],
   savedVocabIds: [],
   completedLessonIds: [],
@@ -134,7 +134,9 @@ export function addXP(amount: number): UserProgress {
   return updateUserProgress((prev) => {
     const today = getTodayISO();
     let streakDays = prev.streakDays;
-    if (prev.lastActiveDate !== today) {
+    if (prev.streakDays === 0 && amount > 0) {
+      streakDays = 1;
+    } else if (prev.lastActiveDate !== today) {
       const prevDate = new Date(prev.lastActiveDate);
       const currDate = new Date(today);
       const diffDays = Math.round(

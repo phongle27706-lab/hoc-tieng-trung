@@ -282,9 +282,6 @@ export function VocabHubClient() {
     return filtered.length > 0 ? filtered : unifiedVocab;
   }, [activeTheme, unifiedVocab]);
 
-  const currentWritingTarget =
-    activeWritingWord ?? activeThemeDeck[0] ?? unifiedVocab[0] ?? null;
-
   const handleReviewSaved = (items: VocabItem[]) => {
     setReviewOverrideItems(items);
     setMainMode("themes");

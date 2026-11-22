@@ -117,7 +117,7 @@ export default function ListeningPage() {
   const [selectedLessonId, setSelectedLessonId] = useState<string>(
     DICTATION_LESSONS[0]?.id ?? ""
   );
-  const [globalShowPinyin, setGlobalShowPinyin] = useState<boolean>(true);
+  const [globalShowPinyin, setGlobalShowPinyin] = useState<boolean>(false);
   // Keyed by `${sentenceId}:${tokenIndex}`
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [tabRevealed, setTabRevealed] = useState<Record<string, boolean>>({});
@@ -150,7 +150,7 @@ export default function ListeningPage() {
   const [shownTranscripts, setShownTranscripts] = useState<
     Record<string, boolean>
   >({});
-  const [taskShowPinyin, setTaskShowPinyin] = useState<boolean>(true);
+  const [taskShowPinyin, setTaskShowPinyin] = useState<boolean>(false);
 
   const taskTabs = useMemo(() => {
     if (Array.isArray(LISTENING_TASK_TABS) && LISTENING_TASK_TABS.length > 0) {

@@ -231,9 +231,14 @@ export default function WritingPage() {
     return byLevel.filter((item) => item.subDifficulty === strokeSubFilter);
   }, [strokeBankList, strokeLevel, strokeSubFilter]);
 
+  const matchedStrokeItem = useMemo(
+    () => strokeBankList.find((item) => item.hanzi === selectedCharHanzi),
+    [strokeBankList, selectedCharHanzi]
+  );
+
   const activeStrokeItem = useMemo(() => {
     return (
-      strokeBankList.find((item) => item.hanzi === selectedCharHanzi) ??
+      matchedStrokeItem ??
       filteredStrokeBank[0] ?? {
         hanzi: selectedCharHanzi || "永",
         pinyin: "yǒng",
@@ -244,7 +249,7 @@ export default function WritingPage() {
         strokes: [],
       }
     );
-  }, [strokeBankList, filteredStrokeBank, selectedCharHanzi]);
+  }, [matchedStrokeItem, filteredStrokeBank, selectedCharHanzi]);
 
   // ==========================================
   // TAB 2: TWO-SENTENCE BUILDER (ĐẶT 2 CÂU)
@@ -666,8 +671,8 @@ export default function WritingPage() {
           {/* Interactive Stroke Canvas Component */}
           <HanziStrokeCanvas
             hanzi={selectedCharHanzi}
-            pinyin={activeStrokeItem.pinyin}
-            meaningVi={activeStrokeItem.meaningVi}
+            pinyin={matchedStrokeItem?.pinyin}
+            meaningVi={matchedStrokeItem?.meaningVi}
           />
         </div>
       )}
