@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@theme {
+  --color-stone-bg: #F2F2F0;
+  --color-stone-surface: #FFFFFF;
+  --color-stone-border: #E5E5E0;
+  --color-stone-text: #262626;
+  --color-stone-muted: #737373;
+  --color-taupe-primary: #6B655E;
+  --color-taupe-hover: #4A4540;
+  --color-charcoal: #292524;
+
+  --font-sans: var(--font-inter), "Noto Sans SC", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-plus-jakarta), var(--font-inter), "Noto Sans SC", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --bg-page: #F2F2F0;
+  --bg-card: #FFFFFF;
+  --border-card: #E5E5E0;
+  --text-primary: #262626;
+  --text-secondary: #737373;
+  --primary: #6B655E;
+  --primary-hover: #4A4540;
+  --charcoal: #292524;
+  --success-text: #15803D;
+  --success-bg: #F0FDF4;
+  --error-text: #B91C1C;
+  --error-bg: #FEF2F2;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+}
