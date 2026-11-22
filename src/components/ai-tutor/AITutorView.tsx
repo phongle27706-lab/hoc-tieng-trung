@@ -1,9 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  Eye,
-  EyeOff,
   GraduationCap,
   KeyRound,
   MessageSquare,
@@ -12,12 +11,12 @@ import {
   PhoneCall,
   Send,
   ShoppingBag,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   UserCheck,
   Users,
-  Volume2,
-  VolumeX,
+  X,
 } from "lucide-react";
 import { ApiKeyModal } from "@/components/ai-tutor/ApiKeyModal";
 import { ChatMessageBubble } from "@/components/ai-tutor/ChatMessageBubble";
@@ -41,6 +40,15 @@ import {
   type SpeechRecognitionInstance,
 } from "@/lib/speech";
 import {
+  clampTTSRate,
+  getAvailableVoices,
+  getPreferredVoiceName,
+  setPreferredVoiceName,
+  subscribeVoicesChanged,
+  TTS_MAX_RATE,
+  TTS_MIN_RATE,
+} from "@/lib/tts-voice";
+import {
   clearAIChatHistory,
   DEFAULT_AI_TUTOR_SETTINGS,
   getAIChatHistory,
@@ -49,8 +57,6 @@ import {
   saveAITutorSettings,
 } from "@/lib/storage";
 import type { AIPersonaMode, AITutorSettings, ChatMessage } from "@/types";
-
-const TTS_SPEEDS: number[] = [0.8, 1.0, 1.15];
 
 const ROLE_ICONS: Record<
   AIRoleplayRole,
@@ -80,6 +86,9 @@ export function AITutorView() {
   const [defaultShowPinyin, setDefaultShowPinyin] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [isApiModalOpen, setIsApiModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [zhVoices, setZhVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedZhVoice, setSelectedZhVoice] = useState<string>("");
   const [hydrated, setHydrated] = useState(false);
   const [tutorMode, setTutorMode] = useState<"chat" | "call">("chat");
 
@@ -99,9 +108,15 @@ export function AITutorView() {
     setSettings(getAITutorSettings());
     setMessages(getAIChatHistory());
     setSpeechSupported(isSpeechRecognitionSupported());
+    setSelectedZhVoice(getPreferredVoiceName("zh") ?? "");
+    setZhVoices(getAvailableVoices("zh"));
+    const unsubscribeVoices = subscribeVoicesChanged(() => {
+      setZhVoices(getAvailableVoices("zh"));
+    });
     setHydrated(true);
 
     return () => {
+      unsubscribeVoices();
       stopSpeaking();
       recognizerRef.current?.abort();
     };
@@ -346,158 +361,90 @@ export function AITutorView() {
       {/* Top Chat Header */}
       <header className="shrink-0 border-b border-[#E5E5E0] bg-[#F2F2F0]/60 px-4 py-3 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* Active Persona Avatar + Status */}
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-[#E5E5E0] bg-[#FFFFFF] text-2xl">
+          {/* Left: Title + Status Pill */}
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[#E5E5E0] bg-[#FFFFFF] text-xl">
               <span>{activePersona.emoji}</span>
               <span
-                className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-[#FFFFFF] bg-[#6B655E]"
+                className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#FFFFFF] bg-[#6B655E]"
                 title="Đang sẵn sàng"
               />
             </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-base font-bold text-[#262626] sm:text-lg">
-                  Gia sư AI BaoBao (包包)
-                </h1>
-                <span className="inline-flex items-center gap-1 rounded-full border border-[#E5E5E0] bg-[#FFFFFF] px-2.5 py-0.5 text-[11px] font-semibold text-[#4A4540]">
-                  {activeRoleCfg.label} · {activeLevelCfg.shortLabel}
-                </span>
-              </div>
-              <p className="mt-0.5 line-clamp-1 text-xs text-[#737373]">
-                {activePersona.descriptionVi}
-              </p>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <h1 className="whitespace-nowrap text-base font-bold text-[#262626] sm:text-lg">
+                Gia sư AI BaoBao
+              </h1>
+              <span className="inline-flex items-center rounded-full border border-[#E5E5E0] bg-[#FFFFFF] px-2.5 py-0.5 text-[11px] font-semibold text-[#4A4540]">
+                {activeLevelCfg.shortLabel} · {activePersona.label}
+              </span>
             </div>
           </div>
 
-          {/* Header Audio & Utility Actions */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            {/* Prominent Mode Toggle: Chat vs Live Voice Call */}
-            <div
-              className="inline-flex items-center rounded-xl border border-[#E5E5E0] bg-[#FFFFFF] p-0.5"
-              role="tablist"
-              aria-label="Chế độ Gia sư AI BaoBao"
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tutorMode === "chat"}
-                onClick={() => {
-                  stopSpeaking();
-                  recognizerRef.current?.abort();
-                  setIsRecording(false);
-                  setTutorMode("chat");
-                }}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                  tutorMode === "chat"
-                    ? "bg-[#292524] text-[#FFFFFF]"
-                    : "text-[#737373] hover:text-[#262626]"
-                }`}
-              >
-                <MessageSquare className="h-3.5 w-3.5" />
-                <span>Chat Song ngữ</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tutorMode === "call"}
-                onClick={() => {
-                  stopSpeaking();
-                  recognizerRef.current?.abort();
-                  setIsRecording(false);
-                  setTutorMode("call");
-                }}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                  tutorMode === "call"
-                    ? "bg-[#6B655E] text-[#FFFFFF]"
-                    : "text-[#4A4540] hover:bg-[#F2F2F0] hover:text-[#262626]"
-                }`}
-              >
-                <PhoneCall className="h-3.5 w-3.5" />
-                <span>Live Call 3D (Minh Long / Bảo Linh)</span>
-              </button>
-            </div>
-
-            {/* Auto-Read Chinese Toggle */}
+          {/* Center: Mode Switch (Chat | Gọi trực tiếp) */}
+          <div
+            className="inline-flex items-center rounded-xl border border-[#E5E5E0] bg-[#FFFFFF] p-0.5"
+            role="tablist"
+            aria-label="Chế độ Gia sư AI BaoBao"
+          >
             <button
               type="button"
+              role="tab"
+              aria-selected={tutorMode === "chat"}
               onClick={() => {
-                setAutoRead((prev) => {
-                  if (prev) stopSpeaking();
-                  return !prev;
-                });
+                stopSpeaking();
+                recognizerRef.current?.abort();
+                setIsRecording(false);
+                setTutorMode("chat");
               }}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
-                autoRead
-                  ? "border-[#292524] bg-[#292524] text-[#FFFFFF]"
-                  : "border-[#E5E5E0] bg-[#FFFFFF] text-[#737373] hover:text-[#262626]"
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                tutorMode === "chat"
+                  ? "bg-[#292524] text-[#FFFFFF]"
+                  : "text-[#737373] hover:text-[#262626]"
               }`}
-              title="Tự động đọc phát âm tiếng Trung (zh-CN) khi BaoBao trả lời"
             >
-              {autoRead ? (
-                <Volume2 className="h-3.5 w-3.5" />
-              ) : (
-                <VolumeX className="h-3.5 w-3.5" />
-              )}
-              <span className="hidden sm:inline">
-                {autoRead ? "Đọc ZH: Bật" : "Đọc ZH: Tắt"}
-              </span>
+              <MessageSquare className="h-3.5 w-3.5" />
+              <span>Chat</span>
             </button>
-
-            {/* TTS Speed Selector (0.8x / 1.0x / 1.15x) */}
-            <div
-              className="inline-flex items-center rounded-lg border border-[#E5E5E0] bg-[#FFFFFF] p-0.5"
-              role="group"
-              aria-label="Tốc độ đọc tiếng Trung"
-            >
-              {TTS_SPEEDS.map((speed) => (
-                <button
-                  key={speed}
-                  type="button"
-                  onClick={() => setTtsRate(speed)}
-                  className={`rounded-md px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer ${
-                    ttsRate === speed
-                      ? "bg-[#292524] text-[#FFFFFF]"
-                      : "text-[#737373] hover:text-[#262626]"
-                  }`}
-                >
-                  {speed}x
-                </button>
-              ))}
-            </div>
-
-            {/* Toggle Default Pinyin in Chat */}
             <button
               type="button"
-              onClick={() => setDefaultShowPinyin((prev) => !prev)}
-              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                defaultShowPinyin
-                  ? "border-[#292524] bg-[#292524] text-white"
-                  : "border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
+              role="tab"
+              aria-selected={tutorMode === "call"}
+              onClick={() => {
+                stopSpeaking();
+                recognizerRef.current?.abort();
+                setIsRecording(false);
+                setIsSettingsOpen(false);
+                setTutorMode("call");
+              }}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                tutorMode === "call"
+                  ? "bg-[#6B655E] text-[#FFFFFF]"
+                  : "text-[#4A4540] hover:bg-[#F2F2F0] hover:text-[#262626]"
               }`}
-              title="Bật/tắt hiển thị phiên âm Pinyin trong khung chat"
             >
-              <span>{defaultShowPinyin ? "Pinyin: Bật" : "Pinyin: Tắt"}</span>
+              <PhoneCall className="h-3.5 w-3.5" />
+              <span>Gọi trực tiếp</span>
             </button>
+          </div>
 
-            {/* Toggle Default Vietnamese Translation */}
-            <button
-              type="button"
-              onClick={() => setDefaultShowVi((prev) => !prev)}
-              className="inline-flex items-center gap-1 rounded-lg border border-[#E5E5E0] bg-[#FFFFFF] px-2.5 py-1.5 text-xs font-medium text-[#4A4540] hover:bg-[#F2F2F0] cursor-pointer"
-              title="Bật/tắt hiển thị bản dịch tiếng Việt mặc định"
-            >
-              {defaultShowVi ? (
-                <Eye className="h-3.5 w-3.5" />
-              ) : (
-                <EyeOff className="h-3.5 w-3.5 text-[#737373]" />
-              )}
-              <span className="hidden md:inline">
-                {defaultShowVi ? "Dịch VI" : "Ẩn VI"}
-              </span>
-            </button>
+          {/* Right: Tùy chỉnh + API Key + Clear */}
+          <div className="flex items-center gap-1.5">
+            {tutorMode === "chat" && (
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen((prev) => !prev)}
+                aria-expanded={isSettingsOpen}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
+                  isSettingsOpen
+                    ? "border-[#292524] bg-[#292524] text-[#FFFFFF]"
+                    : "border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
+                }`}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                <span>Tùy chỉnh</span>
+              </button>
+            )}
 
-            {/* Compact API Key Settings Button */}
             <button
               type="button"
               onClick={() => setIsApiModalOpen(true)}
@@ -514,7 +461,7 @@ export function AITutorView() {
               )}
             </button>
 
-            {messages.length > 0 && (
+            {messages.length > 0 && tutorMode === "chat" && (
               <button
                 type="button"
                 onClick={handleClearChat}
@@ -526,95 +473,220 @@ export function AITutorView() {
             )}
           </div>
         </div>
+      </header>
 
-        {/* Compact Controls Bar: Level Limit + Roleplay Role + 4 Attitude Personas */}
-        {tutorMode === "chat" && (
-          <div className="mt-3 flex flex-col gap-2 border-t border-[#E5E5E0] pt-2.5">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              {/* Level Limit Selector */}
-              <div className="flex items-center gap-1.5 overflow-x-auto">
-                <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
-                  Trình độ:
+      {/* Collapsible Settings Drawer/Panel */}
+      <AnimatePresence initial={false}>
+        {tutorMode === "chat" && isSettingsOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+            className="shrink-0 overflow-hidden border-b border-[#E5E5E0] bg-[#FAFAF8]"
+          >
+            <div className="space-y-4 px-4 py-4 sm:px-6">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wider text-[#737373]">
+                  Cấu hình Gia sư & Giọng đọc
                 </span>
-                <div className="flex items-center gap-1">
-                  {AI_LEVEL_LIMIT_LIST.map((lvl) => {
-                    const active = levelLimit === lvl.id;
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="rounded-lg p-1 text-[#737373] hover:bg-[#E5E5E0]/50 hover:text-[#262626] cursor-pointer"
+                  aria-label="Đóng bảng tùy chỉnh"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {/* Trình độ */}
+                <div className="space-y-1.5">
+                  <span className="block text-xs font-semibold text-[#4A4540]">
+                    Trình độ
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {AI_LEVEL_LIMIT_LIST.map((lvl) => {
+                      const active = levelLimit === lvl.id;
+                      return (
+                        <button
+                          key={lvl.id}
+                          type="button"
+                          onClick={() => setLevelLimit(lvl.id)}
+                          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                            active
+                              ? "bg-[#292524] text-[#FFFFFF]"
+                              : "border border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
+                          }`}
+                        >
+                          {lvl.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Vai diễn */}
+                <div className="space-y-1.5">
+                  <span className="block text-xs font-semibold text-[#4A4540]">
+                    Vai diễn
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {AI_ROLEPLAY_ROLE_LIST.map((role) => {
+                      const active = roleplayRole === role.id;
+                      const Icon = ROLE_ICONS[role.id];
+                      return (
+                        <button
+                          key={role.id}
+                          type="button"
+                          onClick={() => setRoleplayRole(role.id)}
+                          className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                            active
+                              ? "bg-[#4A4540] text-[#FFFFFF]"
+                              : "border border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
+                          }`}
+                        >
+                          <Icon className="h-3 w-3" />
+                          <span>{role.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* 4 Thái độ */}
+              <div className="space-y-1.5">
+                <span className="block text-xs font-semibold text-[#4A4540]">
+                  Thái độ BaoBao
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {AI_PERSONA_LIST.map((p) => {
+                    const isSelected = p.id === settings.persona;
                     return (
                       <button
-                        key={lvl.id}
+                        key={p.id}
                         type="button"
-                        onClick={() => setLevelLimit(lvl.id)}
-                        className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                          active
+                        onClick={() => handleSelectPersona(p.id)}
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                          isSelected
                             ? "bg-[#292524] text-[#FFFFFF]"
                             : "border border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
                         }`}
                       >
-                        {lvl.label}
+                        <span>{p.emoji}</span>
+                        <span>{p.label}</span>
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Roleplay Role Selector */}
-              <div className="flex items-center gap-1.5 overflow-x-auto">
-                <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
-                  Vai diễn:
-                </span>
-                <div className="flex items-center gap-1">
-                  {AI_ROLEPLAY_ROLE_LIST.map((role) => {
-                    const active = roleplayRole === role.id;
-                    const Icon = ROLE_ICONS[role.id];
-                    return (
-                      <button
-                        key={role.id}
-                        type="button"
-                        onClick={() => setRoleplayRole(role.id)}
-                        className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                          active
-                            ? "bg-[#4A4540] text-[#FFFFFF]"
-                            : "border border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
-                        }`}
-                      >
-                        <Icon className="h-3 w-3" />
-                        <span>{role.label}</span>
-                      </button>
-                    );
-                  })}
+              {/* Giọng đọc + Tốc độ + Toggles */}
+              <div className="grid grid-cols-1 gap-4 border-t border-[#E5E5E0] pt-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label
+                      htmlFor="tts-rate-slider"
+                      className="text-xs font-semibold text-[#4A4540]"
+                    >
+                      Tốc độ giọng nói
+                    </label>
+                    <span className="rounded-md bg-[#FFFFFF] px-2 py-0.5 text-xs font-semibold text-[#262626] border border-[#E5E5E0]">
+                      {ttsRate.toFixed(2).replace(/\.00$/, ".0")}x
+                    </span>
+                  </div>
+                  <input
+                    id="tts-rate-slider"
+                    type="range"
+                    min={TTS_MIN_RATE}
+                    max={TTS_MAX_RATE}
+                    step={0.05}
+                    value={ttsRate}
+                    onChange={(e) => setTtsRate(clampTTSRate(Number(e.target.value)))}
+                    className="w-full accent-[#292524] cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[11px] text-[#737373]">
+                    <span>0.7x (Chậm)</span>
+                    <span>1.0x (Chuẩn)</span>
+                    <span>1.3x (Nhanh)</span>
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            {/* 4 Attitude Personas */}
-            <div className="flex items-center gap-1.5 overflow-x-auto">
-              <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
-                Thái độ BaoBao:
-              </span>
-              <div className="flex items-center gap-1.5">
-                {AI_PERSONA_LIST.map((p) => {
-                  const isSelected = p.id === settings.persona;
-                  return (
+                <div className="space-y-2.5">
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="zh-voice-select"
+                      className="block text-xs font-semibold text-[#4A4540]"
+                    >
+                      Giọng đọc tiếng Trung (zh-CN)
+                    </label>
+                    <select
+                      id="zh-voice-select"
+                      value={selectedZhVoice}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSelectedZhVoice(val);
+                        setPreferredVoiceName("zh", val || undefined);
+                      }}
+                      className="w-full rounded-lg border border-[#E5E5E0] bg-[#FFFFFF] px-2.5 py-1.5 text-xs text-[#262626] focus:border-[#292524] focus:outline-none"
+                    >
+                      <option value="">Tự động chọn giọng tự nhiên nhất</option>
+                      {zhVoices.map((v) => (
+                        <option key={v.name} value={v.name}>
+                          {v.name} ({v.lang})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
                     <button
-                      key={p.id}
                       type="button"
-                      onClick={() => handleSelectPersona(p.id)}
-                      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                        isSelected
+                      onClick={() => {
+                        setAutoRead((prev) => {
+                          if (prev) stopSpeaking();
+                          return !prev;
+                        });
+                      }}
+                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                        autoRead
                           ? "bg-[#292524] text-[#FFFFFF]"
                           : "border border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
                       }`}
                     >
-                      <span>{p.emoji}</span>
-                      <span>{p.label}</span>
+                      Tự động đọc: {autoRead ? "Bật" : "Tắt"}
                     </button>
-                  );
-                })}
+                    <button
+                      type="button"
+                      onClick={() => setDefaultShowPinyin((prev) => !prev)}
+                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                        defaultShowPinyin
+                          ? "bg-[#292524] text-[#FFFFFF]"
+                          : "border border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
+                      }`}
+                    >
+                      Hiện Pinyin: {defaultShowPinyin ? "Bật" : "Tắt"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDefaultShowVi((prev) => !prev)}
+                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                        defaultShowVi
+                          ? "bg-[#292524] text-[#FFFFFF]"
+                          : "border border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
+                      }`}
+                    >
+                      Hiện dịch Việt: {defaultShowVi ? "Bật" : "Tắt"}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          </motion.div>
         )}
-      </header>
+      </AnimatePresence>
 
       {tutorMode === "call" ? (
         <LiveVoiceCall

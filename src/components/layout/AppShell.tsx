@@ -24,7 +24,9 @@ import {
   AlertCircle,
   Languages,
   FolderOpen,
+  ChevronDown,
 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "@/components/auth/AuthContext";
 import {
   DEFAULT_USER_PROGRESS,
@@ -40,7 +42,6 @@ interface NavItem {
   href: string;
   label: string;
   shortLabel: string;
-  chineseLabel: string;
   icon: React.ComponentType<{ className?: string }>;
 }
 
@@ -49,42 +50,36 @@ export const PRIMARY_NAV_ITEMS: NavItem[] = [
     href: "/",
     label: "Tổng quan",
     shortLabel: "Tổng quan",
-    chineseLabel: "学习总览",
     icon: LayoutDashboard,
   },
   {
     href: "/roadmap",
     label: "Lộ trình HSK 0 → 7–9",
     shortLabel: "Lộ trình",
-    chineseLabel: "学习路线",
     icon: Map,
   },
   {
     href: "/vocab",
     label: "Từ vựng & Mẫu câu",
     shortLabel: "Từ vựng",
-    chineseLabel: "词汇与句型",
     icon: BookMarked,
   },
   {
     href: "/grammar",
     label: "Ngữ pháp",
     shortLabel: "Ngữ pháp",
-    chineseLabel: "核心语法",
     icon: GraduationCap,
   },
   {
     href: "/exams",
     label: "Kiểm tra & Thi thử",
     shortLabel: "Kiểm tra",
-    chineseLabel: "考试与面试",
     icon: ClipboardCheck,
   },
   {
     href: "/ai-tutor",
     label: "Gia sư AI BaoBao",
     shortLabel: "BaoBao AI",
-    chineseLabel: "AI导师包包",
     icon: Bot,
   },
 ];
@@ -94,35 +89,30 @@ export const SKILL_NAV_ITEMS: NavItem[] = [
     href: "/listening",
     label: "Luyện Nghe",
     shortLabel: "Nghe",
-    chineseLabel: "听力 · Listening",
     icon: Headphones,
   },
   {
     href: "/speaking",
     label: "Luyện Nói",
     shortLabel: "Nói",
-    chineseLabel: "口语 · Speaking",
     icon: Mic,
   },
   {
     href: "/reading",
     label: "Luyện Đọc",
     shortLabel: "Đọc",
-    chineseLabel: "阅读 · Reading",
     icon: BookOpen,
   },
   {
     href: "/writing",
     label: "Luyện Viết",
     shortLabel: "Viết",
-    chineseLabel: "写作与汉字 · Writing",
     icon: PenLine,
   },
   {
     href: "/translation",
     label: "Dịch Việt ↔ Trung",
     shortLabel: "Dịch",
-    chineseLabel: "双语翻译 · Translation",
     icon: Languages,
   },
 ];
@@ -131,24 +121,24 @@ const ALL_NAV_ITEMS: NavItem[] = [...PRIMARY_NAV_ITEMS, ...SKILL_NAV_ITEMS];
 
 function getPageTitle(pathname: string): { title: string; subtitle: string } {
   if (pathname === "/") {
-    return { title: "Tổng quan học tập", subtitle: "HanziStudio · Mức 0 – HSK 9" };
+    return { title: "Tổng quan học tập", subtitle: "Quái Vật Tiếng Trung · HSK 0 – 9" };
   }
   if (pathname.startsWith("/study")) {
-    return { title: "Phòng tự học", subtitle: "自学课堂 · Video & Bài tập chuyên biệt" };
+    return { title: "Phòng tự học", subtitle: "Video & Bài tập chuyên biệt" };
   }
   if (pathname.startsWith("/exams")) {
-    return { title: "Kiểm tra & Thi thử", subtitle: "考试与面试 · Test đầu vào, Thi thử HSK & Phỏng vấn" };
+    return { title: "Kiểm tra & Thi thử", subtitle: "Test đầu vào, Thi thử HSK & Phỏng vấn" };
   }
   if (pathname.startsWith("/library")) {
-    return { title: "Thư viện Tài liệu & Video", subtitle: "学习资料库 · 9 Bộ PDF & 20 Kênh YouTube" };
+    return { title: "Thư viện Tài liệu & Video", subtitle: "9 Bộ PDF & 20 Kênh YouTube" };
   }
   const match = ALL_NAV_ITEMS.find(
     (item) => item.href !== "/" && pathname.startsWith(item.href)
   );
   if (match) {
-    return { title: match.label, subtitle: match.chineseLabel };
+    return { title: match.label, subtitle: "Quái Vật Tiếng Trung · HSK 0 – 9" };
   }
-  return { title: "HanziStudio", subtitle: "Tiếng Trung Mức 0 – HSK 9" };
+  return { title: "Quái Vật Tiếng Trung", subtitle: "HSK 0 – 9" };
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -161,6 +151,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const isAuthPage = pathname === "/login" || pathname === "/register";
+  const isSkillRoute = SKILL_NAV_ITEMS.some((item) => pathname.startsWith(item.href));
+  const [skillsOpen, setSkillsOpen] = useState<boolean>(isSkillRoute);
+
+  useEffect(() => {
+    if (isSkillRoute) {
+      setSkillsOpen(true);
+    }
+  }, [isSkillRoute]);
 
   useEffect(() => {
     if (isAuthPage) return;
@@ -189,7 +187,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "hanzistudio-backup.json";
+      a.download = "quai-vat-tieng-trung-backup.json";
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -239,29 +237,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Link
         key={item.href}
         href={item.href}
-        className={`group relative flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm transition-all duration-200 ${
+        className={`group relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all duration-200 ${
           active
             ? "bg-[#F2F2F0] font-semibold text-[#292524] shadow-[inset_0_0_0_1px_#E5E5E0]"
             : "font-medium text-[#6B655E] hover:bg-[#FAF9F7] hover:text-[#262626]"
         }`}
       >
-        <div className="flex min-w-0 items-center gap-3">
-          <Icon
-            className={`h-4 w-4 shrink-0 transition-colors duration-200 ${
-              active
-                ? "text-[#292524]"
-                : "text-[#A3A3A3] group-hover:text-[#6B655E]"
-            }`}
-          />
-          <span className="truncate">{item.label}</span>
-        </div>
-        <span
-          className={`shrink-0 text-[10px] font-medium ${
-            active ? "text-[#6B655E]" : "text-[#A3A3A3]"
+        <Icon
+          className={`h-4 w-4 shrink-0 transition-colors duration-200 ${
+            active
+              ? "text-[#292524]"
+              : "text-[#A3A3A3] group-hover:text-[#6B655E]"
           }`}
-        >
-          {item.chineseLabel.split(" · ")[0]}
-        </span>
+        />
+        <span className="truncate">{item.label}</span>
       </Link>
     );
   };
@@ -278,10 +267,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
             <div className="leading-tight">
               <span className="block font-display text-sm font-bold tracking-tight text-[#262626]">
-                Hanzi<span className="text-[#6B655E]">Studio</span>
+                Quái Vật Tiếng Trung
               </span>
               <span className="block text-[10px] font-medium text-[#737373]">
-                Tiếng Trung Mức 0 – HSK 9
+                HSK 0 – 9
               </span>
             </div>
           </Link>
@@ -295,10 +284,34 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="space-y-0.5">{PRIMARY_NAV_ITEMS.map(renderNavLink)}</div>
 
           <div className="space-y-1">
-            <p className="px-3 text-[10px] font-semibold uppercase tracking-wider text-[#A3A3A3]">
-              4 Kỹ năng (四项技能)
-            </p>
-            <div className="space-y-0.5">{SKILL_NAV_ITEMS.map(renderNavLink)}</div>
+            <button
+              type="button"
+              onClick={() => setSkillsOpen((prev) => !prev)}
+              aria-expanded={skillsOpen}
+              className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[#6B655E] transition-colors hover:bg-[#FAF9F7] hover:text-[#262626] cursor-pointer"
+            >
+              <span>Kỹ năng</span>
+              <ChevronDown
+                className={`h-4 w-4 transition-transform duration-200 ${
+                  skillsOpen ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+            <AnimatePresence initial={false}>
+              {skillsOpen && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2, ease: "easeInOut" }}
+                  className="overflow-hidden"
+                >
+                  <div className="space-y-0.5 pt-0.5">
+                    {SKILL_NAV_ITEMS.map(renderNavLink)}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </nav>
 
@@ -370,7 +383,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={handleExportBackup}
               className="inline-flex items-center justify-center gap-1 rounded-lg border border-[#E5E5E0] bg-white px-2 py-1.5 text-[11px] font-medium text-[#4A4540] transition-colors hover:bg-[#FAF9F7] hover:text-[#292524] cursor-pointer"
-              title="Tải xuống bản sao lưu JSON (hanzistudio-backup.json)"
+              title="Tải xuống bản sao lưu JSON (quai-vat-tieng-trung-backup.json)"
             >
               <Download className="h-3 w-3 shrink-0" />
               <span className="truncate">Sao lưu (JSON)</span>
@@ -411,7 +424,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Link
               href="/"
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#292524] text-white md:hidden"
-              aria-label="HanziStudio Trang chủ"
+              aria-label="Quái Vật Tiếng Trung Trang chủ"
             >
               <span className="font-display text-xs font-bold">汉</span>
             </Link>

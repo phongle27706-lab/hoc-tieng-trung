@@ -30,6 +30,7 @@ import { DRIVE_RESOURCES } from "@/data/resources";
 import { speakChinese } from "@/lib/speech";
 import { getCompletedSessionIds } from "@/lib/storage";
 import type {
+  ExerciseQuestion,
   LessonVocabItem,
   SkillType,
   StudySession,
@@ -58,6 +59,77 @@ const DIFFICULTY_LABELS: Record<
   medium: { label: "Trung bình", variant: "warning" },
   hard: { label: "Nâng cao", variant: "accent" },
 };
+
+function buildVocabExercises(
+  sessionId: string,
+  newWords: LessonVocabItem[]
+): ExerciseQuestion[] {
+  if (newWords.length === 0) return [];
+
+  const fallbackMeanings = [
+    "Xin chào / Chào hỏi",
+    "Cảm ơn nhiều",
+    "Làm việc / Công tác",
+    "Học tập / Nghiên cứu",
+  ];
+  const fallbackHanzi = ["你好", "谢谢", "工作", "学习"];
+
+  const pickDistractors = (
+    pool: string[],
+    correct: string,
+    fallbacks: string[]
+  ): string[] => {
+    const unique = Array.from(new Set(pool.filter((x) => x !== correct)));
+    for (const fb of fallbacks) {
+      if (unique.length >= 3) break;
+      if (fb !== correct && !unique.includes(fb)) unique.push(fb);
+    }
+    return [correct, ...unique.slice(0, 3)].sort((a, b) => a.localeCompare(b));
+  };
+
+  const allMeanings = newWords.map((w) => w.meaningVi);
+  const allHanzi = newWords.map((w) => w.hanzi);
+  const generated: ExerciseQuestion[] = [];
+
+  for (let i = 0; i < 5; i++) {
+    const word = newWords[i % newWords.length];
+    if (i % 3 === 0) {
+      generated.push({
+        id: `${sessionId}-vocab-listen-${i}`,
+        type: "listening-mcq",
+        skill: "listening",
+        promptVi: `Nghe phát âm từ mới và chọn nghĩa tiếng Việt đúng:`,
+        audioTextZh: word.hanzi,
+        options: pickDistractors(allMeanings, word.meaningVi, fallbackMeanings),
+        correctAnswer: word.meaningVi,
+        explanationVi: `"${word.hanzi}" (${word.pinyin}) có nghĩa là: ${word.meaningVi}.`,
+      });
+    } else if (i % 3 === 1) {
+      generated.push({
+        id: `${sessionId}-vocab-hanzi-${i}`,
+        type: "reading-comprehension",
+        skill: "reading",
+        promptVi: `Chọn chữ Hán đúng cho phiên âm "${word.pinyin}" (${word.meaningVi}):`,
+        options: pickDistractors(allHanzi, word.hanzi, fallbackHanzi),
+        correctAnswer: word.hanzi,
+        explanationVi: `Chữ Hán của "${word.pinyin}" (${word.meaningVi}) là ${word.hanzi}.`,
+      });
+    } else {
+      generated.push({
+        id: `${sessionId}-vocab-sentence-${i}`,
+        type: "writing-two-sentences",
+        skill: "writing",
+        promptVi: `Thực hành đặt câu với từ mới "${word.hanzi}" (${word.pinyin} — ${word.meaningVi}):`,
+        targetHanzi: word.hanzi,
+        targetWordMeaningVi: word.meaningVi,
+        correctAnswer: word.hanzi,
+        explanationVi: `Hãy dùng từ "${word.hanzi}" (${word.meaningVi}) trong ngữ cảnh giao tiếp thực tế.`,
+      });
+    }
+  }
+
+  return generated;
+}
 
 export function StudyRoomClient({
   session,
@@ -100,6 +172,13 @@ export function StudyRoomClient({
   const grammarPoints = session.grammarPoints ?? [];
   const grammarNotesVi = session.grammarNotesVi ?? [];
   const diffMeta = DIFFICULTY_LABELS[session.difficulty];
+  const combinedExercises = useMemo(
+    () => [
+      ...session.exercises,
+      ...buildVocabExercises(session.id, newWords),
+    ],
+    [session.id, session.exercises, newWords]
+  );
 
   const tabs: {
     id: StudyTab;
@@ -136,7 +215,7 @@ export function StudyRoomClient({
     {
       id: "exercises",
       label: "4. Bài tập",
-      shortMeta: `${session.exercises.length} câu`,
+      shortMeta: `${combinedExercises.length} câu`,
       icon: ClipboardCheck,
     },
   ];
@@ -369,15 +448,44 @@ export function StudyRoomClient({
             <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-12">
               {/* Left: New Words List */}
               <div className="space-y-3 lg:col-span-6">
-                <div className="flex items-center justify-between rounded-xl border border-[#E5E5E0] bg-white px-4 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#E5E5E0] bg-white px-4 py-3">
                   <div>
                     <h2 className="text-sm font-semibold text-[#262626]">
                       Danh sách Từ mới · 生词 ({newWords.length} từ)
                     </h2>
                     <p className="text-xs text-[#737373]">
-                      Bấm vào bất kỳ từ nào để mở khung tập viết ô Mễ tự cách
-                      (米字格)
+                      Bấm vào thẻ từ để xem chi tiết &amp; mở khung luyện viết (米字格)
                     </p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowPinyin((v) => !v)}
+                      className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
+                        showPinyin
+                          ? "border-[#292524] bg-[#292524] text-white"
+                          : "border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:bg-[#F2F2F0]"
+                      }`}
+                    >
+                      <Languages className="h-3 w-3" />
+                      Pinyin
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowTranslation((v) => !v)}
+                      className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
+                        showTranslation
+                          ? "border-[#6B655E] bg-[#6B655E] text-white"
+                          : "border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:bg-[#F2F2F0]"
+                      }`}
+                    >
+                      {showTranslation ? (
+                        <Eye className="h-3 w-3" />
+                      ) : (
+                        <EyeOff className="h-3 w-3" />
+                      )}
+                      Nghĩa Việt
+                    </button>
                   </div>
                 </div>
 
@@ -395,24 +503,28 @@ export function StudyRoomClient({
                         }`}
                       >
                         <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0 space-y-1">
-                            <div className="flex flex-wrap items-baseline gap-2">
-                              <span className="text-2xl font-bold text-[#262626]">
+                          <div className="min-w-0 space-y-1.5">
+                            <div className="flex flex-wrap items-end gap-2.5">
+                              <ruby className="text-[26px] font-bold leading-snug text-[#262626]">
                                 {word.hanzi}
-                              </span>
-                              <span className="text-sm font-semibold text-[#6B655E]">
-                                {word.pinyin}
-                              </span>
+                                {showPinyin && (
+                                  <rt className="text-xs font-semibold text-[#6B655E]">
+                                    {word.pinyin}
+                                  </rt>
+                                )}
+                              </ruby>
                               <span className="rounded-full bg-[#F2F2F0] px-2 py-0.5 text-[11px] font-medium text-[#4A4540]">
                                 {word.partOfSpeech}
                               </span>
                             </div>
 
-                            <p className="text-sm font-medium text-[#262626]">
-                              {word.meaningVi}
-                            </p>
+                            {showTranslation && (
+                              <p className="text-sm font-medium text-[#262626]">
+                                {word.meaningVi}
+                              </p>
+                            )}
 
-                            {(word.radical || word.strokeCount) && (
+                            {isSelected && (word.radical || word.strokeCount !== undefined) && (
                               <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-[#737373]">
                                 {word.radical && (
                                   <span className="rounded-md border border-[#E5E5E0] bg-white px-2 py-0.5">
@@ -441,21 +553,19 @@ export function StudyRoomClient({
                               <Volume2 className="h-4 w-4" />
                             </button>
 
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedWord(word);
-                              }}
-                              className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                                isSelected
-                                  ? "bg-[#292524] text-white"
-                                  : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:bg-[#F2F2F0]"
-                              }`}
-                            >
-                              <PenTool className="h-3.5 w-3.5" />
-                              Luyện viết nét (米字格)
-                            </button>
+                            {isSelected && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedWord(word);
+                                }}
+                                className="inline-flex items-center gap-1 rounded-lg bg-[#292524] px-2.5 py-1.5 text-xs font-semibold text-white transition-colors cursor-pointer"
+                              >
+                                <PenTool className="h-3.5 w-3.5" />
+                                Luyện viết nét (米字格)
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -577,17 +687,19 @@ export function StudyRoomClient({
                           </span>
 
                           <div className="min-w-0 flex-1 space-y-1">
-                            <div className="text-base font-semibold leading-relaxed text-[#262626]">
-                              <InteractiveChineseText
-                                text={line.zh}
-                                pinyin={line.pinyin}
-                              />
+                            <div className="flex flex-col">
+                              {showPinyin && (
+                                <p className="text-xs font-medium text-[#6B655E]">
+                                  {line.pinyin}
+                                </p>
+                              )}
+                              <div className="text-xl sm:text-[22px] font-semibold leading-relaxed text-[#262626]">
+                                <InteractiveChineseText
+                                  text={line.zh}
+                                  pinyin={line.pinyin}
+                                />
+                              </div>
                             </div>
-                            {showPinyin && (
-                              <p className="text-xs font-medium text-[#6B655E]">
-                                {line.pinyin}
-                              </p>
-                            )}
                             {showTranslation && (
                               <p className="text-xs text-[#737373]">
                                 {line.vi}
@@ -734,7 +846,7 @@ export function StudyRoomClient({
           <ExerciseEngine
             sessionId={session.id}
             skillFocus={session.skillFocus}
-            exercises={session.exercises}
+            exercises={combinedExercises}
             onSessionCompleted={() => setIsCompleted(true)}
           />
           <div className="text-center">

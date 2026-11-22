@@ -182,25 +182,25 @@ export function DashboardView() {
   // 4 Skills
   const skills = [
     {
-      label: "听力 Nghe",
+      label: "Nghe",
       score: progress.skillScores.listening,
       href: "/listening",
       icon: Headphones,
     },
     {
-      label: "口语 Nói",
+      label: "Nói",
       score: progress.skillScores.speaking,
       href: "/speaking",
       icon: Mic,
     },
     {
-      label: "阅读 Đọc",
+      label: "Đọc",
       score: progress.skillScores.reading,
       href: "/reading",
       icon: BookOpen,
     },
     {
-      label: "写作 Viết",
+      label: "Viết",
       score: progress.skillScores.writing,
       href: "/writing",
       icon: PenTool,
@@ -212,7 +212,7 @@ export function DashboardView() {
     {
       href: "/listening",
       title: "Nghe Dictation",
-      subtitle: "Chép chính tả chữ Hán · 听力",
+      subtitle: "Chép chính tả chữ Hán",
       icon: Headphones,
     },
     {
@@ -372,7 +372,7 @@ export function DashboardView() {
                   whileTap={{ scale: 0.97 }}
                   className="inline-flex w-full items-center justify-between rounded-full border border-[#E5E5E0] bg-[#F2F2F0] px-4 py-2 text-xs font-semibold text-[#262626] hover:border-[#6B655E] hover:bg-[#262626] hover:text-[#F2F2F0] transition-colors"
                 >
-                  <span>Live Call ngay</span>
+                  <span>Gọi trực tiếp ngay</span>
                   <ArrowRight className="h-3.5 w-3.5" />
                 </motion.div>
               </Link>
@@ -420,15 +420,15 @@ export function DashboardView() {
               <div className="grid grid-cols-3 gap-1.5 border-t border-[#E5E5E0] pt-3 text-center">
                 <div>
                   <div className="text-xs font-bold text-[#262626]">{progress.streakDays}d</div>
-                  <div className="text-[10px] text-[#6B655E]">Streak</div>
+                  <div className="text-[10px] text-[#6B655E]">Chuỗi ngày</div>
                 </div>
                 <div className="border-x border-[#E5E5E0]">
                   <div className="text-xs font-bold text-[#262626]">{progress.level}</div>
-                  <div className="text-[10px] text-[#6B655E]">Level</div>
+                  <div className="text-[10px] text-[#6B655E]">Cấp độ</div>
                 </div>
                 <div>
                   <div className="text-xs font-bold text-[#262626]">{savedVocabCount}</div>
-                  <div className="text-[10px] text-[#6B655E]">Saved</div>
+                  <div className="text-[10px] text-[#6B655E]">Đã lưu</div>
                 </div>
               </div>
             </motion.div>
@@ -577,10 +577,10 @@ export function DashboardView() {
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-[#D6D3CD]">
-                      SRS Hôm nay
+                      Ôn tập hôm nay
                     </p>
                     <h3 className="mt-1 text-sm font-semibold text-white">
-                      Chữ Hán cần ôn SRS hôm nay
+                      Chữ Hán cần ôn tập hôm nay
                     </h3>
                   </div>
                   <BookMarked className="h-4 w-4 text-[#D6D3CD] shrink-0" />

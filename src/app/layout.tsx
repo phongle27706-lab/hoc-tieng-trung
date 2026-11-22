@@ -18,8 +18,8 @@ const plusJakarta = Plus_Jakarta_Sans({
 
 export const metadata: Metadata = {
   title: {
-    default: "HanziStudio — Nền Tảng Tự Học Tiếng Trung Mức 0 – HSK 9 Cho Người Việt",
-    template: "%s | HanziStudio",
+    default: "Quái Vật Tiếng Trung — Nền Tảng Tự Học Tiếng Trung Mức 0 – HSK 9 Cho Người Việt",
+    template: "%s | Quái Vật Tiếng Trung",
   },
   description:
     "Nền tảng tự học tiếng Trung toàn diện từ Mức 0 (Pinyin, 50 bộ thủ) đến HSK 9 dành cho người Việt: Lộ trình cá nhân hóa, Luyện Nghe – Nói – Đọc – Viết chữ Hán chấm nét, Dịch Việt ↔ Trung, Từ vựng Mind Map & Gia sư AI BaoBao 3D.",
@@ -32,19 +32,19 @@ export const metadata: Metadata = {
     "luyện thi HSKK",
     "ngữ pháp tiếng Trung",
     "từ vựng tiếng Trung SRS",
-    "HanziStudio",
+    "Quái Vật Tiếng Trung",
   ],
   openGraph: {
     type: "website",
     locale: "vi_VN",
-    siteName: "HanziStudio",
-    title: "HanziStudio — Nền Tảng Tự Học Tiếng Trung Mức 0 – HSK 9 Cho Người Việt",
+    siteName: "Quái Vật Tiếng Trung",
+    title: "Quái Vật Tiếng Trung — Nền Tảng Tự Học Tiếng Trung Mức 0 – HSK 9 Cho Người Việt",
     description:
       "Lộ trình học tiếng Trung bài bản Mức 0 – HSK 9 với 4 kỹ năng Nghe, Nói, Đọc, Viết chữ Hán chấm nét, Flashcard SRS và Gia sư AI BaoBao 3D.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "HanziStudio — Tự Học Tiếng Trung Mức 0 – HSK 9",
+    title: "Quái Vật Tiếng Trung — Tự Học Tiếng Trung Mức 0 – HSK 9",
     description:
       "Nền tảng tự học tiếng Trung toàn diện dành cho người Việt: Nghe, Nói, Đọc, Viết chữ Hán, Ngữ pháp & Từ vựng SRS.",
   },

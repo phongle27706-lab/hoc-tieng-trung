@@ -76,12 +76,51 @@ function matchesGenderHint(
   return FEMALE_VI_HINTS.some((h) => lower.includes(h));
 }
 
+export const TTS_MIN_RATE = 0.7;
+export const TTS_MAX_RATE = 1.3;
+
+export function clampTTSRate(rate: number): number {
+  if (!Number.isFinite(rate)) return 1.0;
+  return Math.round(Math.min(TTS_MAX_RATE, Math.max(TTS_MIN_RATE, rate)) * 100) / 100;
+}
+
+const NATURAL_ZH_PRIORITY = [
+  "microsoft xiaoxiao online (natural)",
+  "microsoft yunxi online (natural)",
+  "microsoft xiaoyi online (natural)",
+  "google 普通话",
+  "ting-ting",
+  "meijia",
+];
+
+function getVoiceQualityScore(voice: SpeechSynthesisVoice, lang: TTSLang): number {
+  const name = voice.name.toLowerCase();
+  const targetLang = lang === "zh" ? "zh-cn" : "vi-vn";
+  let score = 0;
+
+  if (lang === "zh") {
+    const idx = NATURAL_ZH_PRIORITY.findIndex((p) => name.includes(p));
+    if (idx !== -1) {
+      score += 1000 - idx * 50;
+    }
+  }
+
+  if (name.includes("natural")) score += 300;
+  if (name.includes("neural")) score += 250;
+  if (name.includes("online")) score += 200;
+  if (!voice.localService) score += 100;
+  if (voice.lang.toLowerCase() === targetLang) score += 50;
+
+  return score;
+}
+
 export function getAvailableVoices(lang: TTSLang): SpeechSynthesisVoice[] {
   if (!isBrowser() || !("speechSynthesis" in window)) return [];
   const prefix = lang === "zh" ? "zh" : "vi";
   return window.speechSynthesis
     .getVoices()
-    .filter((v) => v.lang.toLowerCase().startsWith(prefix));
+    .filter((v) => v.lang.toLowerCase().startsWith(prefix))
+    .sort((a, b) => getVoiceQualityScore(b, lang) - getVoiceQualityScore(a, lang));
 }
 
 export function subscribeVoicesChanged(cb: () => void): () => void {
@@ -152,8 +191,7 @@ export function resolveVoiceConfig(
   }
 
   const fallback =
-    candidates.find((v) => v.lang === targetLang && v.localService) ||
-    candidates.find((v) => v.lang === targetLang) ||
+    candidates.find((v) => v.lang.toLowerCase() === targetLang.toLowerCase()) ||
     candidates[0] ||
     null;
 

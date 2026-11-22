@@ -41,7 +41,7 @@ export default function LoginPage() {
             <BookOpen className="h-6 w-6" />
           </div>
           <h1 className="mt-3 font-display text-2xl font-bold tracking-tight text-[#262626]">
-            Hanzi<span className="text-[#6B655E]">Studio</span>
+            Quái Vật Tiếng Trung
           </h1>
           <p className="mt-1 text-sm text-[#737373]">
             Nền tảng tự học tiếng Trung Mức 0 – HSK 9 tối giản &amp; tập trung

@@ -1,4 +1,5 @@
 import type { HSKLevel, SubDifficulty } from "@/types";
+import { TRANSLATION_EXERCISES_EXTRA } from "./translation-extra";
 
 export type TranslationDirection = "vi-to-zh" | "zh-to-vi";
 
@@ -1514,9 +1515,9 @@ const BILINGUAL_SEEDS: RawSeed[] = [
   ],
 ];
 
-// Build 160 TranslationExercises (80 seeds × 2 directions: vi-to-zh and zh-to-vi)
-export const TRANSLATION_EXERCISES: TranslationExercise[] = BILINGUAL_SEEDS.flatMap(
-  (seed, index) => {
+// Build 200 TranslationExercises (80 seeds × 2 directions + 40 extra practical exercises)
+export const TRANSLATION_EXERCISES: TranslationExercise[] = [
+  ...BILINGUAL_SEEDS.flatMap((seed, index) => {
     const [
       level,
       subDifficulty,
@@ -1571,8 +1572,9 @@ export const TRANSLATION_EXERCISES: TranslationExercise[] = BILINGUAL_SEEDS.flat
     };
 
     return [viToZhExercise, zhToViExercise];
-  }
-);
+  }),
+  ...TRANSLATION_EXERCISES_EXTRA,
+];
 
 function normalizeForComparison(text: string): string {
   return text
