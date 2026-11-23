@@ -1,4 +1,4 @@
-import type { RoadmapStage, StudySession } from "@/types";
+import type { HSKLevel, RoadmapStage, StudySession } from "@/types";
 import { HSK0_STANDARD_SESSIONS } from "./hsk0-standard";
 import { HSK1_STANDARD_SESSIONS } from "./hsk1-standard";
 import { HSK2_STANDARD_SESSIONS } from "./hsk2-standard";
@@ -9,18 +9,35 @@ import { HSK6_STANDARD_SESSIONS } from "./hsk6-standard";
 import { HSK7_STANDARD_SESSIONS } from "./hsk7-standard";
 import { HSK8_STANDARD_SESSIONS } from "./hsk8-standard";
 import { HSK9_STANDARD_SESSIONS } from "./hsk9-standard";
+import { applyLessonExpansion } from "./helpers";
+import {
+  HSK_EXPANSION_BY_LEVEL,
+  loadHskExpansion,
+} from "./expansion";
+
+export { loadHskExpansion };
+
+function expandStageSessions(
+  level: HSKLevel,
+  sessions: StudySession[]
+): StudySession[] {
+  const expansionMap = HSK_EXPANSION_BY_LEVEL[level];
+  return sessions.map((session) =>
+    applyLessonExpansion(session, expansionMap[session.id])
+  );
+}
 
 export const ALL_STUDY_SESSIONS: StudySession[] = [
-  ...HSK0_STANDARD_SESSIONS,
-  ...HSK1_STANDARD_SESSIONS,
-  ...HSK2_STANDARD_SESSIONS,
-  ...HSK3_STANDARD_SESSIONS,
-  ...HSK4_STANDARD_SESSIONS,
-  ...HSK5_STANDARD_SESSIONS,
-  ...HSK6_STANDARD_SESSIONS,
-  ...HSK7_STANDARD_SESSIONS,
-  ...HSK8_STANDARD_SESSIONS,
-  ...HSK9_STANDARD_SESSIONS,
+  ...expandStageSessions("HSK0", HSK0_STANDARD_SESSIONS),
+  ...expandStageSessions("HSK1", HSK1_STANDARD_SESSIONS),
+  ...expandStageSessions("HSK2", HSK2_STANDARD_SESSIONS),
+  ...expandStageSessions("HSK3", HSK3_STANDARD_SESSIONS),
+  ...expandStageSessions("HSK4", HSK4_STANDARD_SESSIONS),
+  ...expandStageSessions("HSK5", HSK5_STANDARD_SESSIONS),
+  ...expandStageSessions("HSK6", HSK6_STANDARD_SESSIONS),
+  ...expandStageSessions("HSK7", HSK7_STANDARD_SESSIONS),
+  ...expandStageSessions("HSK8", HSK8_STANDARD_SESSIONS),
+  ...expandStageSessions("HSK9", HSK9_STANDARD_SESSIONS),
 ];
 
 function sessionIdsForStage(stageId: number): string[] {

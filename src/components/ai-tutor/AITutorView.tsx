@@ -193,18 +193,27 @@ export function AITutorView() {
       }
 
       try {
+        const numericHsk =
+          levelLimit === "HSK1"
+            ? 1
+            : levelLimit === "HSK3"
+              ? 3
+              : levelLimit === "HSK5"
+                ? 5
+                : undefined;
         const res = await fetch("/api/ai-tutor", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message: text,
-            history: nextHistory.slice(-8).map((m) => ({
+            history: nextHistory.slice(-10).map((m) => ({
               role: m.role,
               contentZh: m.contentZh,
               contentVi: m.contentVi,
             })),
             persona: settings.persona,
             levelLimit,
+            ...(numericHsk !== undefined ? { hskLevel: numericHsk } : {}),
             roleplayRole: effectiveRole,
             analyzeOnly,
             apiKey: settings.apiKey || undefined,
@@ -735,13 +744,9 @@ export function AITutorView() {
         <LiveVoiceCall
           persona={settings.persona}
           onChangePersona={handleSelectPersona}
-          initialLevel={
-            levelLimit === "HSK1" ||
-            levelLimit === "HSK3" ||
-            levelLimit === "HSK5"
-              ? levelLimit
-              : "HSK1"
-          }
+          hskLevel={levelLimit}
+          onHskLevelChange={setLevelLimit}
+          onOpenApiKeyModal={() => setIsApiModalOpen(true)}
         />
       ) : (
         <>

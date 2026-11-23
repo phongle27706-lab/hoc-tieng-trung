@@ -1,12 +1,10 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { motion } from "framer-motion";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BookOpen,
   CheckCircle2,
-  ChevronDown,
   GraduationCap,
   Languages,
   RotateCcw,
@@ -14,25 +12,19 @@ import {
   XCircle,
 } from "lucide-react";
 import { InteractiveChineseText } from "@/components/dictionary/InteractiveChineseText";
-import { ResourceBanner } from "@/components/resources/ResourceBanner";
-import { TACTILE_SPRING } from "@/components/ui/MotionPrimitives";
+import {
+  SkillFocusLayout,
+  type SkillFocusLessonItem,
+} from "@/components/ui/SkillFocusLayout";
+import { formatUnifiedHSKLabel } from "@/components/ui/UnifiedFilterBar";
 import * as grammarModule from "@/data/grammar";
-import { getResourcesByCategory } from "@/data/resources";
+import type { GrammarTopic } from "@/data/grammar";
+import { loadGrammarExtraByFilter } from "@/data/skills/grammar";
 import { speakChinese } from "@/lib/speech";
 import { addXP, recordMistake } from "@/lib/storage";
 import type { HSKLevel, SubDifficulty } from "@/types";
 
-const HSK_LEVELS: Array<HSKLevel | "HSK7-9"> = [
-  "HSK0",
-  "HSK1",
-  "HSK2",
-  "HSK3",
-  "HSK4",
-  "HSK5",
-  "HSK6",
-  "HSK7-9",
-];
-
+type GrammarCenterTab = "theory" | "practice" | "reference";
 type QuickTableTab =
   | "radicals"
   | "tone-sandhi"
@@ -77,7 +69,7 @@ const TONE_SANDHI_ROWS = [
   },
   {
     rule: "Ba thanh 3 đi liền (3 + 3 + 3)",
-    condition: "Nhóm từ雙音 + 單音 hoặc 單音 + 雙音",
+    condition: "Nhóm từ đôi + đơn hoặc đơn + đôi",
     change: "Đọc thành (2 + 2 + 3) hoặc (3 + 2 + 3) tùy nhịp ngữ pháp",
     example: "展览馆 (zhǎnlǎnguǎn → zhánlánguǎn) · 我很好 (wǒ hěn hǎo → wǒ hén hǎo)",
   },
@@ -156,9 +148,9 @@ const COMPLEMENT_ROWS = [
 const BA_BEI_ROWS = [
   {
     structure: "Câu chữ 把 (把字句 — Chủ động xử lý)",
-    formula: "Chủ ngữ + (ไม่/没) + 把 + Tân ngữ xác định + Động từ + Thành phần khác (了/着/Bổ ngữ)",
+    formula: "Chủ ngữ + (不/没) + 把 + Tân ngữ xác định + Động từ + Thành phần khác (了/着/Bổ ngữ)",
     usageVi:
-      "Nhấn mạnh chủ ngữ tác động làm thay đổi vị trí hoặc trạng thái của một sự vật xác định. Lưu ý: Phó từ phủ định (不/没) và động từ năng nguyện (想/要/能) BẮT BUỘC đặt TRƯỚC chữ 把!",
+      "Nhấn mạnh chủ ngữ tác động làm thay đổi vị trí hoặc trạng thái của một sự vật xác định. Phó từ phủ định (不/没) và động từ năng nguyện (想/要/能) đặt TRƯỚC chữ 把.",
     exampleZh: "请把那份外贸合同发到我的邮箱。",
     examplePinyin: "Qǐng bǎ nà fèn wàimào hétóng fā dào wǒ de yóuxiāng.",
     exampleVi: "Làm ơn gửi bản hợp đồng ngoại thương đó vào email của tôi.",
@@ -167,7 +159,7 @@ const BA_BEI_ROWS = [
     structure: "Câu bị động chữ 被 (被字句 — Bị / Được)",
     formula: "Chủ ngữ (Bị tác động) + (不/没) + 被 (+ Tác nhân) + Động từ + Thành phần khác",
     usageVi:
-      "Biểu thị chủ ngữ chịu sự tác động của người/sự việc khác. Trong khẩu ngữ có thể thay 被 bằng 叫 (jiào) hoặc 让 (ràng) nhưng sau 叫/让 bắt buộc phải có tân ngữ chỉ tác nhân.",
+      "Biểu thị chủ ngữ chịu sự tác động của người/sự việc khác. Trong khẩu ngữ có thể thay 被 bằng 叫 hoặc 让 nhưng sau 叫/让 bắt buộc có tác nhân.",
     exampleZh: "那批货物已经被海关检查过了。",
     examplePinyin: "Nà pī huòwù yǐjīng bèi hǎiguān jiǎnchá guò le.",
     exampleVi: "Lô hàng hóa đó đã được hải quan kiểm tra qua rồi.",
@@ -196,15 +188,48 @@ interface NormalizedGrammarTopic {
   exercises: NormalizedGrammarQuestion[];
 }
 
-export default function GrammarPage() {
-  const [selectedLevel, setSelectedLevel] = useState<HSKLevel | "HSK7-9">("HSK0");
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [showRefTable, setShowRefTable] = useState<boolean>(true);
-  const [activeTableTab, setActiveTableTab] =
-    useState<QuickTableTab>("radicals");
-  const [showPinyin, setShowPinyin] = useState<boolean>(true);
+const HSK_SORT_ORDER: HSKLevel[] = [
+  "HSK0",
+  "HSK1",
+  "HSK2",
+  "HSK3",
+  "HSK4",
+  "HSK5",
+  "HSK6",
+  "HSK7",
+  "HSK8",
+  "HSK9",
+];
 
-  const allTopics = useMemo<NormalizedGrammarTopic[]>(() => {
+export default function GrammarPage() {
+  const [selectedLevel, setSelectedLevel] = useState<HSKLevel | "ALL" | "HSK7-9">("HSK0");
+  const [selectedTopicId, setSelectedTopicId] = useState<string>("");
+  const [centerTab, setCenterTab] = useState<GrammarCenterTab>("theory");
+  const [exerciseIndex, setExerciseIndex] = useState<number>(0);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [activeTableTab, setActiveTableTab] = useState<QuickTableTab>("radicals");
+  const [showPinyin, setShowPinyin] = useState<boolean>(true);
+  const [extraTopics, setExtraTopics] = useState<GrammarTopic[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadGrammarExtraByFilter(selectedLevel)
+      .then((loaded) => {
+        if (!cancelled) {
+          setExtraTopics(loaded);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setExtraTopics([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLevel]);
+
+  const baseTopics = useMemo<NormalizedGrammarTopic[]>(() => {
     const raw =
       (
         grammarModule as unknown as {
@@ -253,12 +278,54 @@ export default function GrammarPage() {
     });
   }, []);
 
+  const allTopics = useMemo<NormalizedGrammarTopic[]>(() => {
+    const map = new Map<string, NormalizedGrammarTopic>();
+    for (const topic of baseTopics) {
+      map.set(topic.id, topic);
+    }
+    for (const topic of extraTopics) {
+      if (!map.has(topic.id)) {
+        map.set(topic.id, topic);
+      }
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => HSK_SORT_ORDER.indexOf(a.level) - HSK_SORT_ORDER.indexOf(b.level)
+    );
+  }, [baseTopics, extraTopics]);
+
   const topics = useMemo(
     () =>
-      selectedLevel === "HSK7-9"
-        ? allTopics.filter((t) => ["HSK7", "HSK8", "HSK9"].includes(t.level))
-        : allTopics.filter((t) => t.level === selectedLevel),
+      selectedLevel === "ALL"
+        ? allTopics
+        : selectedLevel === "HSK7-9"
+          ? allTopics.filter((t) => ["HSK7", "HSK8", "HSK9"].includes(t.level))
+          : allTopics.filter((t) => t.level === selectedLevel),
     [allTopics, selectedLevel]
+  );
+
+  const activeTopic = useMemo(
+    () => topics.find((t) => t.id === selectedTopicId) ?? topics[0],
+    [topics, selectedTopicId]
+  );
+
+  const exercises = activeTopic?.exercises ?? [];
+  const safeExIndex = Math.min(
+    exerciseIndex,
+    Math.max(0, exercises.length - 1)
+  );
+  const currentQuestion = exercises[safeExIndex];
+
+  const completedExIndices = useMemo(() => {
+    const set = new Set<number>();
+    exercises.forEach((q, idx) => {
+      if (answers[q.id] === q.correctAnswer) set.add(idx);
+    });
+    return set;
+  }, [exercises, answers]);
+
+  const totalExercisesInLevel = useMemo(
+    () => topics.reduce((sum, t) => sum + t.exercises.length, 0),
+    [topics]
   );
 
   const handleSelect = (
@@ -283,326 +350,138 @@ export default function GrammarPage() {
     }
   };
 
+  const sidebarLessons: SkillFocusLessonItem[] = useMemo(
+    () =>
+      topics.map((t) => {
+        const done =
+          t.exercises.length > 0 &&
+          t.exercises.every((q) => answers[q.id] === q.correctAnswer);
+        return {
+          id: t.id,
+          title: t.titleVi,
+          badge: t.level,
+          subtitle: t.titleZh,
+          meta: `${t.exercises.length} câu`,
+          completed: done,
+        };
+      }),
+    [topics, answers]
+  );
+
+  const chosen = currentQuestion ? answers[currentQuestion.id] : undefined;
+  const isCorrect = currentQuestion
+    ? chosen === currentQuestion.correctAnswer
+    : false;
+
   return (
-    <div className="mx-auto max-w-5xl space-y-6 pb-12">
-      {/* Header */}
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wider text-[#737373]">
-            核心语法 · Ngữ Pháp Tiếng Trung Cốt Lõi (Mức 0 → HSK 9)
-          </p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[#262626] sm:text-3xl">
-            Bảng Công Thức Nhanh &amp; Chuyên Đề Ngữ Pháp HSK
-          </h1>
+    <SkillFocusLayout
+      backHref="/roadmap"
+      hskLevel={selectedLevel}
+      onHskLevelChange={(lvl) => {
+        setSelectedLevel(lvl as HSKLevel | "ALL" | "HSK7-9");
+        setSelectedTopicId("");
+        setExerciseIndex(0);
+      }}
+      allowAllLevel
+      currentTitle={
+        centerTab === "reference"
+          ? "Bảng tra cứu nhanh (Bộ thủ · Biến điệu · Lượng từ)"
+          : activeTopic
+            ? `${activeTopic.titleVi} · ${activeTopic.titleZh}`
+            : "Ngữ pháp tiếng Trung"
+      }
+      modeSlot={
+        <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
+          {(
+            [
+              { id: "theory" as const, label: "Công thức & Ví dụ" },
+              { id: "practice" as const, label: "Luyện tập từng câu" },
+              { id: "reference" as const, label: "Bộ thủ & Bảng" },
+            ]
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setCenterTab(tab.id)}
+              className={`cursor-pointer rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors sm:text-xs ${
+                centerTab === tab.id
+                  ? "bg-white text-brand-active shadow-2xs ring-1 ring-brand/60"
+                  : "text-[#737373] hover:text-[#262626]"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
-
-        <button
-          type="button"
-          onClick={() => setShowPinyin((prev) => !prev)}
-          className={`inline-flex cursor-pointer items-center gap-1.5 self-start rounded-xl border px-3.5 py-2 text-xs font-semibold transition-colors sm:self-auto ${
-            showPinyin
-              ? "border-[#292524] bg-[#292524] text-white"
-              : "border-[#E5E5E0] bg-white text-[#4A4540] hover:border-[#6B655E]"
-          }`}
-        >
-          <Languages className="h-4 w-4" />
-          {showPinyin ? "Pinyin ví dụ: BẬT" : "Pinyin ví dụ: TẮT"}
-        </button>
-      </div>
-
-      {/* Collapsible Quick Reference Tables (50 Bộ thủ, Biến điệu, Lượng từ, Bổ ngữ, Câu chữ 把/被) */}
-      <section className="overflow-hidden rounded-2xl border border-[#E5E5E0] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-        <button
-          type="button"
-          onClick={() => setShowRefTable((prev) => !prev)}
-          aria-expanded={showRefTable}
-          className="flex w-full cursor-pointer items-center justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-[#FAF9F7]"
-        >
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#F2F1ED] text-[#292524]">
-              <BookOpen className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <h2 className="truncate text-sm font-bold text-[#262626]">
-                Bảng công thức ngữ pháp nhanh (50 Bộ thủ · Biến điệu Thanh 3/一/不 · Lượng từ · Bổ ngữ · Câu chữ 把/被)
-              </h2>
-              <p className="text-xs text-[#737373]">
-                Nhấn để {showRefTable ? "thu gọn" : "mở rộng"} 5 bảng hệ thống ngữ pháp tiếng Trung cốt lõi
-              </p>
-            </div>
-          </div>
-          <ChevronDown
-            className={`h-4 w-4 shrink-0 text-[#6B655E] transition-transform duration-200 ${
-              showRefTable ? "rotate-180" : ""
-            }`}
-          />
-        </button>
-
-        {showRefTable && (
-          <div className="space-y-4 border-t border-[#E5E5E0] bg-[#FAF9F7] p-5">
-            {/* Sub-Tabs for 5 Quick Reference Tables */}
-            <div className="flex flex-wrap gap-1.5">
-              {(
-                [
-                  { id: "radicals" as const, label: "1. 50 Bộ thủ cốt lõi (部首)" },
-                  {
-                    id: "tone-sandhi" as const,
-                    label: "2. Biến điệu Thanh 3 / 一 / 不",
-                  },
-                  { id: "classifiers" as const, label: "3. Lượng từ thông dụng (量词)" },
-                  {
-                    id: "complements" as const,
-                    label: "4. Bổ ngữ & 的/地/得",
-                  },
-                  { id: "ba-bei" as const, label: "5. Câu chữ 把 & Bị động 被" },
-                ]
-              ).map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTableTab(tab.id)}
-                  className={`cursor-pointer rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors ${
-                    activeTableTab === tab.id
-                      ? "bg-[#292524] text-white"
-                      : "border border-[#E5E5E0] bg-white text-[#4A4540] hover:border-[#6B655E]"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Table 1: Radicals */}
-            {activeTableTab === "radicals" && (
-              <div className="overflow-x-auto rounded-xl border border-[#E5E5E0] bg-white">
-                <table className="w-full min-w-[560px] text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-[#E5E5E0] bg-[#F2F1ED] text-[#4A4540]">
-                      <th className="px-3.5 py-2.5 font-semibold">Bộ thủ</th>
-                      <th className="px-3.5 py-2.5 font-semibold">Tên gọi</th>
-                      <th className="px-3.5 py-2.5 font-semibold">Ý nghĩa gốc</th>
-                      <th className="px-3.5 py-2.5 font-semibold">Chữ Hán tiêu biểu</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#E5E5E0] text-[#262626]">
-                    {RADICAL_50_LIST.map((row) => (
-                      <tr key={row.r} className="hover:bg-[#FAF9F7]">
-                        <td className="px-3.5 py-2 text-base font-bold text-[#292524]">
-                          {row.r}
-                        </td>
-                        <td className="px-3.5 py-2 font-semibold text-[#6B655E]">
-                          {row.name}
-                        </td>
-                        <td className="px-3.5 py-2 text-[#57534E]">
-                          {row.meaning}
-                        </td>
-                        <td className="px-3.5 py-2 font-medium">
-                          <InteractiveChineseText text={row.ex} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Table 2: Tone Sandhi */}
-            {activeTableTab === "tone-sandhi" && (
-              <div className="overflow-x-auto rounded-xl border border-[#E5E5E0] bg-white">
-                <table className="w-full min-w-[580px] text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-[#E5E5E0] bg-[#F2F1ED] text-[#4A4540]">
-                      <th className="px-3.5 py-2.5 font-semibold">Quy tắc biến điệu</th>
-                      <th className="px-3.5 py-2.5 font-semibold">Điều kiện</th>
-                      <th className="px-3.5 py-2.5 font-semibold">Cách đọc đúng</th>
-                      <th className="px-3.5 py-2.5 font-semibold">Ví dụ chuẩn</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#E5E5E0] text-[#262626]">
-                    {TONE_SANDHI_ROWS.map((row) => (
-                      <tr key={row.rule} className="hover:bg-[#FAF9F7]">
-                        <td className="px-3.5 py-2.5 font-bold text-[#292524]">
-                          {row.rule}
-                        </td>
-                        <td className="px-3.5 py-2.5 text-[#737373]">
-                          {row.condition}
-                        </td>
-                        <td className="px-3.5 py-2.5 font-semibold text-[#6B655E]">
-                          {row.change}
-                        </td>
-                        <td className="px-3.5 py-2.5 font-mono">
-                          {row.example}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Table 3: Classifiers */}
-            {activeTableTab === "classifiers" && (
-              <div className="overflow-x-auto rounded-xl border border-[#E5E5E0] bg-white">
-                <table className="w-full min-w-[560px] text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-[#E5E5E0] bg-[#F2F1ED] text-[#4A4540]">
-                      <th className="px-3.5 py-2.5 font-semibold">Lượng từ</th>
-                      <th className="px-3.5 py-2.5 font-semibold">Phạm vi danh từ đi kèm</th>
-                      <th className="px-3.5 py-2.5 font-semibold">Ví dụ thực chiến</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#E5E5E0] text-[#262626]">
-                    {CLASSIFIER_ROWS.map((row) => (
-                      <tr key={row.mw} className="hover:bg-[#FAF9F7]">
-                        <td className="px-3.5 py-2.5 font-bold text-[#292524]">
-                          {row.mw}
-                        </td>
-                        <td className="px-3.5 py-2.5 text-[#57534E]">
-                          {row.usage}
-                        </td>
-                        <td className="px-3.5 py-2.5 font-medium">
-                          <InteractiveChineseText text={row.ex} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Table 4: Complements */}
-            {activeTableTab === "complements" && (
-              <div className="overflow-x-auto rounded-xl border border-[#E5E5E0] bg-white">
-                <table className="w-full min-w-[580px] text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-[#E5E5E0] bg-[#F2F1ED] text-[#4A4540]">
-                      <th className="px-3.5 py-2.5 font-semibold">Loại bổ ngữ</th>
-                      <th className="px-3.5 py-2.5 font-semibold">Công thức</th>
-                      <th className="px-3.5 py-2.5 font-semibold">Chức năng</th>
-                      <th className="px-3.5 py-2.5 font-semibold">Ví dụ</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#E5E5E0] text-[#262626]">
-                    {COMPLEMENT_ROWS.map((row) => (
-                      <tr key={row.type} className="hover:bg-[#FAF9F7]">
-                        <td className="px-3.5 py-2.5 font-bold text-[#292524]">
-                          {row.type}
-                        </td>
-                        <td className="px-3.5 py-2.5 font-mono text-[#6B655E]">
-                          {row.formula}
-                        </td>
-                        <td className="px-3.5 py-2.5 text-[#57534E]">
-                          {row.meaningVi}
-                        </td>
-                        <td className="px-3.5 py-2.5">{row.example}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Table 5: Ba & Bei Sentences */}
-            {activeTableTab === "ba-bei" && (
-              <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2">
-                {BA_BEI_ROWS.map((item) => (
-                  <div
-                    key={item.structure}
-                    className="space-y-2.5 rounded-xl border border-[#E5E5E0] bg-white p-4 text-xs"
-                  >
-                    <h3 className="text-sm font-bold text-[#262626]">
-                      {item.structure}
-                    </h3>
-                    <div className="rounded-lg bg-[#F2F1ED] px-3 py-2 font-mono font-semibold text-[#292524]">
-                      {item.formula}
-                    </div>
-                    <p className="leading-relaxed text-[#57534E]">
-                      {item.usageVi}
-                    </p>
-                    <div className="rounded-lg border border-[#E5E5E0] bg-[#FAF9F7] p-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-bold text-[#262626]">
-                          <InteractiveChineseText
-                            text={item.exampleZh}
-                            pinyin={item.examplePinyin}
-                          />
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => speakChinese(item.exampleZh, 0.95)}
-                          className="cursor-pointer rounded-lg border border-[#E5E5E0] bg-white p-1.5 text-[#6B655E] hover:border-[#6B655E]"
-                        >
-                          <Volume2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                      <p className="mt-1 font-mono text-[11px] text-[#6B655E]">
-                        {item.examplePinyin}
-                      </p>
-                      <p className="mt-0.5 text-[#737373]">{item.exampleVi}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-
-      {/* HSK0 -> HSK9 Level Selector Pills */}
-      <div className="flex flex-wrap items-center gap-1.5 rounded-2xl border border-[#E5E5E0] bg-white p-3">
-        <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-[#737373]">
-          Chuyên đề theo cấp:
-        </span>
-        {HSK_LEVELS.map((lvl) => (
+      }
+      settingsBadge={showPinyin ? "Pinyin" : undefined}
+      settingsAriaLabel="Cài đặt ngữ pháp"
+      settingsContent={
+        <label className="flex cursor-pointer items-center justify-between text-xs font-semibold text-[#4A4540]">
+          <span className="inline-flex items-center gap-1.5">
+            <Languages className="h-3.5 w-3.5" /> Hiện Pinyin ví dụ
+          </span>
           <button
-            key={lvl}
             type="button"
-            onClick={() => setSelectedLevel(lvl)}
-            className={`relative cursor-pointer rounded-xl px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-              selectedLevel === lvl
-                ? "text-white"
-                : "text-[#57534E] hover:bg-[#FAF9F7] hover:text-[#262626]"
+            role="switch"
+            aria-checked={showPinyin}
+            onClick={() => setShowPinyin((prev) => !prev)}
+            className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors ${
+              showPinyin ? "bg-brand" : "bg-[#D6D3CD]"
             }`}
           >
-            {selectedLevel === lvl && (
-              <motion.span
-                layoutId="grammar-hsk-pill"
-                transition={TACTILE_SPRING}
-                className="absolute inset-0 rounded-xl bg-[#292524]"
-              />
-            )}
-            <span className="relative z-10">
-              {lvl === "HSK0"
-                ? "Mức 0"
-                : lvl === "HSK7-9"
-                  ? "HSK 7–9"
-                  : lvl.replace("HSK", "HSK ")}
-            </span>
+            <span
+              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+                showPinyin ? "left-[18px]" : "left-0.5"
+              }`}
+            />
           </button>
-        ))}
-      </div>
-
-      {/* Grammar Topics for Selected Level */}
-      <div className="space-y-6">
-        {topics.map((topic) => (
-          <section
-            key={topic.id}
-            className="space-y-5 rounded-2xl border border-[#E5E5E0] bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-          >
+        </label>
+      }
+      sidebarTitle="Chuyên đề ngữ pháp"
+      sidebarSummary={`${formatUnifiedHSKLabel(selectedLevel)} · ${topics.length} bài · ${totalExercisesInLevel} câu`}
+      lessons={sidebarLessons}
+      activeLessonId={activeTopic?.id ?? ""}
+      onSelectLesson={(id) => {
+        setSelectedTopicId(id);
+        setExerciseIndex(0);
+        if (centerTab === "reference") setCenterTab("theory");
+      }}
+      pagination={
+        centerTab === "practice" && activeTopic
+          ? {
+              currentIndex: safeExIndex,
+              total: exercises.length,
+              onPrev: () => setExerciseIndex((i) => Math.max(0, i - 1)),
+              onNext: () =>
+                setExerciseIndex((i) => Math.min(exercises.length - 1, i + 1)),
+              onJump: (idx) => setExerciseIndex(idx),
+              itemLabel: "Câu",
+              completedIndices: completedExIndices,
+            }
+          : undefined
+      }
+    >
+      {/* ==================== TAB 1: CÔNG THỨC & VÍ DỤ ==================== */}
+      {centerTab === "theory" &&
+        (activeTopic ? (
+          <div className="space-y-5">
             <div>
               <div className="inline-flex items-center gap-2 text-xs font-semibold text-[#6B655E]">
-                <GraduationCap className="h-4 w-4" />
+                <GraduationCap className="h-4 w-4 text-brand" />
                 <span>
-                  {topic.level} ·{" "}
-                  {topic.subDifficulty === "advanced" ? "Nâng cao" : "Cơ bản"}{" "}
-                  · {topic.titleZh}
+                  {activeTopic.level} ·{" "}
+                  {activeTopic.subDifficulty === "advanced"
+                    ? "Nâng cao"
+                    : "Cơ bản"}{" "}
+                  · {activeTopic.titleZh}
                 </span>
               </div>
               <h2 className="mt-1 text-xl font-bold text-[#262626]">
-                {topic.titleVi}
+                {activeTopic.titleVi}
               </h2>
               <p className="mt-2 text-sm leading-relaxed text-[#4A4540]">
-                {topic.explanationVi}
+                {activeTopic.explanationVi}
               </p>
             </div>
 
@@ -612,7 +491,7 @@ export default function GrammarPage() {
                 Công thức cấu trúc
               </div>
               <div className="mt-1 font-mono text-xs font-semibold text-[#262626] sm:text-sm">
-                {topic.formula}
+                {activeTopic.formula}
               </div>
             </div>
 
@@ -621,17 +500,14 @@ export default function GrammarPage() {
               <div className="text-xs font-semibold uppercase tracking-wider text-[#737373]">
                 Ví dụ thực tế (Nhấp vào từ chữ Hán để tra nghĩa)
               </div>
-              {topic.examples.map((ex, i) => (
+              {activeTopic.examples.map((ex, i) => (
                 <div
                   key={i}
                   className="flex items-start justify-between gap-3 rounded-xl border border-[#E5E5E0] bg-white px-4 py-3"
                 >
                   <div className="space-y-1">
                     <div className="text-base font-bold text-[#262626]">
-                      <InteractiveChineseText
-                        text={ex.zh}
-                        pinyin={ex.pinyin}
-                      />
+                      <InteractiveChineseText text={ex.zh} pinyin={ex.pinyin} />
                     </div>
                     {showPinyin && ex.pinyin && (
                       <p className="font-mono text-xs text-[#6B655E]">
@@ -643,7 +519,7 @@ export default function GrammarPage() {
                   <button
                     type="button"
                     onClick={() => speakChinese(ex.zh, 0.95)}
-                    className="shrink-0 cursor-pointer rounded-lg border border-[#E5E5E0] p-2 text-[#6B655E] hover:bg-[#FAF9F7]"
+                    className="shrink-0 cursor-pointer rounded-lg border border-[#E5E5E0] p-2 text-[#6B655E] hover:border-brand hover:text-brand-active"
                     aria-label="Nghe ví dụ tiếng Trung"
                   >
                     <Volume2 className="h-4 w-4" />
@@ -652,10 +528,10 @@ export default function GrammarPage() {
               ))}
             </div>
 
-            {/* Warnings / Common Mistakes */}
-            {topic.warningsVi.length > 0 && (
+            {/* Warnings */}
+            {activeTopic.warningsVi.length > 0 && (
               <div className="space-y-1.5 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-4 py-3 text-xs text-[#92400E]">
-                {topic.warningsVi.map((warn, wIdx) => (
+                {activeTopic.warningsVi.map((warn, wIdx) => (
                   <div key={wIdx} className="flex items-start gap-2.5">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                     <span>
@@ -666,107 +542,317 @@ export default function GrammarPage() {
               </div>
             )}
 
-            {/* Practice Exercises */}
-            <div className="space-y-3 border-t border-[#E5E5E0] pt-3">
-              <div className="text-xs font-semibold uppercase tracking-wider text-[#737373]">
-                Bài tập thực hành ({topic.exercises.length} câu)
+            {/* Quick CTA to start 1-by-1 practice */}
+            {activeTopic.exercises.length > 0 && (
+              <div className="flex items-center justify-between rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-4 py-3">
+                <span className="text-xs font-medium text-[#57534E]">
+                  Sẵn sàng kiểm tra {activeTopic.exercises.length} câu bài tập của chuyên đề này?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExerciseIndex(0);
+                    setCenterTab("practice");
+                  }}
+                  className="cursor-pointer rounded-xl bg-brand px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-hover"
+                >
+                  Luyện tập ngay →
+                </button>
               </div>
-              {topic.exercises.map((q, idx) => {
-                const chosen = answers[q.id];
-                const isCorrect = chosen === q.correctAnswer;
-                return (
-                  <div
-                    key={q.id}
-                    className="space-y-2.5 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-4"
-                  >
-                    <p className="text-sm font-medium text-[#262626]">
-                      {idx + 1}. {q.promptVi}
-                    </p>
-                    {q.promptZh && (
-                      <div className="rounded-lg border border-[#E5E5E0] bg-white px-3 py-2 text-base font-semibold text-[#262626]">
-                        <InteractiveChineseText text={q.promptZh} />
-                      </div>
-                    )}
-                    <div className="flex flex-wrap gap-2">
-                      {q.options.map((opt) => {
-                        const isPicked = chosen === opt;
-                        const isRight = opt === q.correctAnswer;
-                        let cls =
-                          "border-[#E5E5E0] bg-white text-[#262626] hover:border-[#6B655E]";
-                        if (chosen) {
-                          if (isRight)
-                            cls =
-                              "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D] font-semibold";
-                          else if (isPicked)
-                            cls =
-                              "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]";
-                          else
-                            cls =
-                              "border-[#E5E5E0] bg-white text-[#737373] opacity-60";
-                        }
-                        return (
-                          <button
-                            key={opt}
-                            type="button"
-                            onClick={() =>
-                              handleSelect(
-                                q.id,
-                                q.promptZh
-                                  ? `${q.promptVi} (${q.promptZh})`
-                                  : q.promptVi,
-                                opt,
-                                q.correctAnswer,
-                                q.explanationVi
-                              )
-                            }
-                            className={`cursor-pointer rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors sm:text-sm ${cls}`}
-                          >
-                            {opt}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {chosen && (
-                      <div
-                        className={`flex items-start justify-between gap-2 text-xs ${
-                          isCorrect ? "text-[#15803D]" : "text-[#B91C1C]"
-                        }`}
-                      >
-                        <div className="flex items-start gap-1.5">
-                          {isCorrect ? (
-                            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                          ) : (
-                            <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                          )}
-                          <span>{q.explanationVi}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setAnswers((prev) => {
-                              const copy = { ...prev };
-                              delete copy[q.id];
-                              return copy;
-                            })
-                          }
-                          className="inline-flex shrink-0 cursor-pointer items-center gap-1 font-medium underline"
-                        >
-                          <RotateCcw className="h-3 w-3" /> Làm lại
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+            )}
+          </div>
+        ) : (
+          <p className="py-10 text-center text-sm text-[#737373]">
+            Chưa có chuyên đề ngữ pháp cho cấp độ này.
+          </p>
         ))}
-      </div>
 
-      <ResourceBanner
-        resources={getResourcesByCategory(["grammar", "exercises"])}
-        heading="Tài liệu Ngữ pháp Hán ngữ 1–4 & Bài tập Google Drive"
-      />
-    </div>
+      {/* ==================== TAB 2: LUYỆN TẬP TỪNG CÂU (1-BY-1) ==================== */}
+      {centerTab === "practice" &&
+        (activeTopic && currentQuestion ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#737373]">
+              <span className="font-semibold text-[#57534E]">
+                {activeTopic.titleVi} ({activeTopic.titleZh})
+              </span>
+              <span className="font-semibold text-brand-active">
+                Đúng {completedExIndices.size}/{exercises.length} câu
+              </span>
+            </div>
+
+            <div className="space-y-3 rounded-2xl border border-[#E5E5E0] bg-[#FAF9F7] p-5">
+              <p className="text-base font-bold text-[#262626]">
+                Câu {safeExIndex + 1}. {currentQuestion.promptVi}
+              </p>
+
+              {currentQuestion.promptZh && (
+                <div className="rounded-xl border border-[#E5E5E0] bg-white px-4 py-3 text-lg font-semibold text-[#262626]">
+                  <InteractiveChineseText text={currentQuestion.promptZh} />
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 gap-2.5 pt-1 sm:grid-cols-2">
+                {currentQuestion.options.map((opt) => {
+                  const isPicked = chosen === opt;
+                  const isRight = opt === currentQuestion.correctAnswer;
+                  let cls =
+                    "border-[#E5E5E0] bg-white text-[#262626] hover:border-brand";
+                  if (chosen) {
+                    if (isRight)
+                      cls =
+                        "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D] font-semibold";
+                    else if (isPicked)
+                      cls = "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]";
+                    else
+                      cls =
+                        "border-[#E5E5E0] bg-white text-[#737373] opacity-60";
+                  }
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() =>
+                        handleSelect(
+                          currentQuestion.id,
+                          currentQuestion.promptZh
+                            ? `${currentQuestion.promptVi} (${currentQuestion.promptZh})`
+                            : currentQuestion.promptVi,
+                          opt,
+                          currentQuestion.correctAnswer,
+                          currentQuestion.explanationVi
+                        )
+                      }
+                      className={`cursor-pointer rounded-xl border px-4 py-3 text-left text-sm font-medium transition-colors ${cls}`}
+                    >
+                      {opt}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {chosen && (
+                <div
+                  className={`flex items-start justify-between gap-2 rounded-xl border px-3.5 py-2.5 text-xs ${
+                    isCorrect
+                      ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D]"
+                      : "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]"
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    {isCorrect ? (
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                    ) : (
+                      <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    )}
+                    <span>{currentQuestion.explanationVi}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAnswers((prev) => {
+                        const copy = { ...prev };
+                        delete copy[currentQuestion.id];
+                        return copy;
+                      })
+                    }
+                    className="inline-flex shrink-0 cursor-pointer items-center gap-1 font-medium underline"
+                  >
+                    <RotateCcw className="h-3 w-3" /> Làm lại
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="py-10 text-center text-sm text-[#737373]">
+            Chuyên đề này chưa có bài tập thực hành.
+          </p>
+        ))}
+
+      {/* ==================== TAB 3 (SECONDARY): BỘ THỦ & BẢNG TRA CỨU ==================== */}
+      {centerTab === "reference" && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <BookOpen className="h-4 w-4 text-brand" />
+            <h2 className="text-sm font-bold text-[#262626]">
+              Bảng tra cứu nhanh: Bộ thủ · Biến điệu · Lượng từ · Bổ ngữ · 把/被
+            </h2>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                { id: "radicals" as const, label: "50 Bộ thủ (部首)" },
+                { id: "tone-sandhi" as const, label: "Biến điệu Thanh 3/一/不" },
+                { id: "classifiers" as const, label: "Lượng từ (量词)" },
+                { id: "complements" as const, label: "Bổ ngữ & 的/地/得" },
+                { id: "ba-bei" as const, label: "Câu chữ 把 & 被" },
+              ]
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTableTab(tab.id)}
+                className={`cursor-pointer rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  activeTableTab === tab.id
+                    ? "bg-brand-soft text-brand-active ring-1 ring-brand"
+                    : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-brand"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {activeTableTab === "radicals" && (
+            <div className="overflow-x-auto rounded-xl border border-[#E5E5E0] bg-white">
+              <table className="w-full min-w-[540px] text-left text-xs">
+                <thead>
+                  <tr className="border-b border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540]">
+                    <th className="px-3 py-2 font-semibold">Bộ thủ</th>
+                    <th className="px-3 py-2 font-semibold">Tên gọi</th>
+                    <th className="px-3 py-2 font-semibold">Ý nghĩa gốc</th>
+                    <th className="px-3 py-2 font-semibold">Chữ Hán tiêu biểu</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E5E5E0] text-[#262626]">
+                  {RADICAL_50_LIST.map((row) => (
+                    <tr key={row.r} className="hover:bg-[#FAF9F7]">
+                      <td className="px-3 py-2 text-base font-bold">{row.r}</td>
+                      <td className="px-3 py-2 font-semibold text-[#6B655E]">
+                        {row.name}
+                      </td>
+                      <td className="px-3 py-2 text-[#57534E]">{row.meaning}</td>
+                      <td className="px-3 py-2 font-medium">
+                        <InteractiveChineseText text={row.ex} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {activeTableTab === "tone-sandhi" && (
+            <div className="overflow-x-auto rounded-xl border border-[#E5E5E0] bg-white">
+              <table className="w-full min-w-[560px] text-left text-xs">
+                <thead>
+                  <tr className="border-b border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540]">
+                    <th className="px-3 py-2 font-semibold">Quy tắc</th>
+                    <th className="px-3 py-2 font-semibold">Điều kiện</th>
+                    <th className="px-3 py-2 font-semibold">Cách đọc</th>
+                    <th className="px-3 py-2 font-semibold">Ví dụ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E5E5E0] text-[#262626]">
+                  {TONE_SANDHI_ROWS.map((row) => (
+                    <tr key={row.rule} className="hover:bg-[#FAF9F7]">
+                      <td className="px-3 py-2 font-bold">{row.rule}</td>
+                      <td className="px-3 py-2 text-[#737373]">{row.condition}</td>
+                      <td className="px-3 py-2 font-semibold text-[#6B655E]">
+                        {row.change}
+                      </td>
+                      <td className="px-3 py-2 font-mono">{row.example}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {activeTableTab === "classifiers" && (
+            <div className="overflow-x-auto rounded-xl border border-[#E5E5E0] bg-white">
+              <table className="w-full min-w-[540px] text-left text-xs">
+                <thead>
+                  <tr className="border-b border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540]">
+                    <th className="px-3 py-2 font-semibold">Lượng từ</th>
+                    <th className="px-3 py-2 font-semibold">Phạm vi sử dụng</th>
+                    <th className="px-3 py-2 font-semibold">Ví dụ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E5E5E0] text-[#262626]">
+                  {CLASSIFIER_ROWS.map((row) => (
+                    <tr key={row.mw} className="hover:bg-[#FAF9F7]">
+                      <td className="px-3 py-2 font-bold">{row.mw}</td>
+                      <td className="px-3 py-2 text-[#57534E]">{row.usage}</td>
+                      <td className="px-3 py-2 font-medium">
+                        <InteractiveChineseText text={row.ex} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {activeTableTab === "complements" && (
+            <div className="overflow-x-auto rounded-xl border border-[#E5E5E0] bg-white">
+              <table className="w-full min-w-[560px] text-left text-xs">
+                <thead>
+                  <tr className="border-b border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540]">
+                    <th className="px-3 py-2 font-semibold">Loại bổ ngữ</th>
+                    <th className="px-3 py-2 font-semibold">Công thức</th>
+                    <th className="px-3 py-2 font-semibold">Chức năng</th>
+                    <th className="px-3 py-2 font-semibold">Ví dụ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E5E5E0] text-[#262626]">
+                  {COMPLEMENT_ROWS.map((row) => (
+                    <tr key={row.type} className="hover:bg-[#FAF9F7]">
+                      <td className="px-3 py-2 font-bold">{row.type}</td>
+                      <td className="px-3 py-2 font-mono text-[#6B655E]">
+                        {row.formula}
+                      </td>
+                      <td className="px-3 py-2 text-[#57534E]">{row.meaningVi}</td>
+                      <td className="px-3 py-2">{row.example}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {activeTableTab === "ba-bei" && (
+            <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2">
+              {BA_BEI_ROWS.map((item) => (
+                <div
+                  key={item.structure}
+                  className="space-y-2 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-4 text-xs"
+                >
+                  <h3 className="text-sm font-bold text-[#262626]">
+                    {item.structure}
+                  </h3>
+                  <div className="rounded-lg bg-white px-3 py-2 font-mono font-semibold text-[#292524]">
+                    {item.formula}
+                  </div>
+                  <p className="leading-relaxed text-[#57534E]">{item.usageVi}</p>
+                  <div className="rounded-lg border border-[#E5E5E0] bg-white p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-[#262626]">
+                        <InteractiveChineseText
+                          text={item.exampleZh}
+                          pinyin={item.examplePinyin}
+                        />
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => speakChinese(item.exampleZh, 0.95)}
+                        className="cursor-pointer rounded-lg border border-[#E5E5E0] p-1.5 text-[#6B655E] hover:border-brand"
+                      >
+                        <Volume2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <p className="mt-1 font-mono text-[11px] text-[#6B655E]">
+                      {item.examplePinyin}
+                    </p>
+                    <p className="mt-0.5 text-[#737373]">{item.exampleVi}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </SkillFocusLayout>
   );
 }

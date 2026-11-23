@@ -20,12 +20,15 @@ import {
 interface AITutorRequestBody {
   message?: string;
   history?: Pick<ChatMessage, "role" | "contentZh" | "contentVi">[];
+  conversationHistory?: Pick<ChatMessage, "role" | "contentZh" | "contentVi">[];
   persona?: AIPersonaMode;
   levelLimit?: AILevelLimit;
   hskLevel?: number;
   roleplayRole?: AIRoleplayRole;
   roleplay?: string;
   analyzeOnly?: boolean;
+  mode?: "chat" | "live-call";
+  allowFallback?: boolean;
   apiKey?: string;
   provider?: "gemini" | "openai";
 }
@@ -162,13 +165,29 @@ function parseJsonReply(rawText: string): TutorReply | null {
   }
 }
 
+function trimDuplicateTrailingUser(
+  history: Pick<ChatMessage, "role" | "contentZh" | "contentVi">[],
+  message: string
+): Pick<ChatMessage, "role" | "contentZh" | "contentVi">[] {
+  const recent = history.slice(-10);
+  const last = recent[recent.length - 1];
+  if (
+    last &&
+    last.role === "user" &&
+    (last.contentZh.trim() === message.trim() || last.contentVi.trim() === message.trim())
+  ) {
+    return recent.slice(0, -1);
+  }
+  return recent;
+}
+
 async function callGemini(
   apiKey: string,
   systemInstruction: string,
   message: string,
   history: Pick<ChatMessage, "role" | "contentZh" | "contentVi">[]
 ): Promise<TutorReply | null> {
-  const recent = history.slice(-6).map((m) => ({
+  const recent = trimDuplicateTrailingUser(history, message).map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
     parts: [{ text: m.contentZh || m.contentVi }],
   }));
@@ -205,7 +224,7 @@ async function callOpenAI(
   message: string,
   history: Pick<ChatMessage, "role" | "contentZh" | "contentVi">[]
 ): Promise<TutorReply | null> {
-  const recent = history.slice(-6).map((m) => ({
+  const recent = trimDuplicateTrailingUser(history, message).map((m) => ({
     role: m.role,
     content: m.contentZh || m.contentVi,
   }));
@@ -326,33 +345,39 @@ export async function POST(request: Request) {
         ? body.roleplayRole
         : "teacher";
 
-    const history: Pick<ChatMessage, "role" | "contentZh" | "contentVi">[] =
-      Array.isArray(body.history)
+    const rawHistory = Array.isArray(body.conversationHistory)
+      ? body.conversationHistory
+      : Array.isArray(body.history)
         ? body.history
-            .slice(-MAX_HISTORY_ITEMS)
-            .filter(
-              (item): item is Pick<ChatMessage, "role" | "contentZh" | "contentVi"> =>
-                Boolean(item) &&
-                typeof item === "object" &&
-                (item.role === "user" || item.role === "assistant")
-            )
-            .map((item) => ({
-              role: item.role,
-              contentZh: sanitizePromptInput(
-                typeof item.contentZh === "string" ? item.contentZh : "",
-                MAX_MESSAGE_LENGTH
-              ),
-              contentVi: sanitizePromptInput(
-                typeof item.contentVi === "string" ? item.contentVi : "",
-                MAX_MESSAGE_LENGTH
-              ),
-            }))
         : [];
+
+    const history: Pick<ChatMessage, "role" | "contentZh" | "contentVi">[] =
+      rawHistory
+        .slice(-MAX_HISTORY_ITEMS)
+        .filter(
+          (item): item is Pick<ChatMessage, "role" | "contentZh" | "contentVi"> =>
+            Boolean(item) &&
+            typeof item === "object" &&
+            (item.role === "user" || item.role === "assistant")
+        )
+        .map((item) => ({
+          role: item.role,
+          contentZh: sanitizePromptInput(
+            typeof item.contentZh === "string" ? item.contentZh : "",
+            MAX_MESSAGE_LENGTH
+          ),
+          contentVi: sanitizePromptInput(
+            typeof item.contentVi === "string" ? item.contentVi : "",
+            MAX_MESSAGE_LENGTH
+          ),
+        }));
 
     const roleplay = rawRoleplay
       ? sanitizePromptInput(rawRoleplay, MAX_ROLEPLAY_LENGTH) || undefined
       : undefined;
     const analyzeOnly = Boolean(body.analyzeOnly);
+    const mode = body.mode === "live-call" ? "live-call" : "chat";
+    const allowFallback = Boolean(body.allowFallback);
     const provider = body.provider === "openai" ? "openai" : "gemini";
 
     const clientApiKey =
@@ -392,9 +417,37 @@ export async function POST(request: Request) {
             source: provider,
           });
         }
+        if (mode === "live-call" && !allowFallback) {
+          return NextResponse.json(
+            {
+              error:
+                "Không nhận được phản hồi từ AI (Gemini/OpenAI). Vui lòng kiểm tra lại API Key hoặc mạng.",
+              code: "LLM_ERROR",
+            },
+            { status: 502 }
+          );
+        }
       } catch {
-        // Fall through to Smart Mock
+        if (mode === "live-call" && !allowFallback) {
+          return NextResponse.json(
+            {
+              error:
+                "Lỗi kết nối tới dịch vụ AI (Gemini/OpenAI). Vui lòng kiểm tra mạng hoặc thử lại.",
+              code: "LLM_ERROR",
+            },
+            { status: 502 }
+          );
+        }
       }
+    } else if (mode === "live-call" && !allowFallback) {
+      return NextResponse.json(
+        {
+          error:
+            "Chưa cấu hình API Key (Gemini / OpenAI). Vui lòng bấm 'API Key' ở góc trên hoặc bật Chế độ Demo trong Cài đặt.",
+          code: "MISSING_API_KEY",
+        },
+        { status: 503 }
+      );
     }
 
     const mockReply = generateMockTutorResponse(message, persona, {

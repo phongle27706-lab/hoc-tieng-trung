@@ -3,10 +3,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
-  BookOpen,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   Languages,
   Mic,
   MicOff,
@@ -18,10 +14,18 @@ import {
   SPEAKING_SENTENCES,
   type SpeakingSentence,
 } from "@/data/chinese/speaking";
+import {
+  SPEAKING_EXTRA_MANIFEST,
+  SPEAKING_EXTRA_TOTAL,
+  loadSpeakingExtraByLevel,
+  type SpeakingShadowingLesson,
+} from "@/data/skills/speaking";
 import { InteractiveChineseText } from "@/components/dictionary/InteractiveChineseText";
-import { ResourceBanner } from "@/components/resources/ResourceBanner";
-import { UnifiedFilterBar } from "@/components/ui/UnifiedFilterBar";
-import { getResourcesByCategory } from "@/data/resources";
+import {
+  SkillFocusLayout,
+  type SkillFocusLessonItem,
+} from "@/components/ui/SkillFocusLayout";
+import { formatUnifiedHSKLabel } from "@/components/ui/UnifiedFilterBar";
 import {
   createChineseRecognizer,
   isSpeechRecognitionSupported,
@@ -32,29 +36,11 @@ import {
 import { addXP, markLessonCompleted } from "@/lib/storage";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/Card";
 import { Progress } from "@/components/ui/Progress";
 import type { HSKLevel, SubDifficulty } from "@/types";
 
 type SubFilter = "all" | SubDifficulty;
-
-const HSK_LEVELS: Array<"ALL" | HSKLevel | "HSK7-9"> = [
-  "ALL",
-  "HSK0",
-  "HSK1",
-  "HSK2",
-  "HSK3",
-  "HSK4",
-  "HSK5",
-  "HSK6",
-  "HSK7-9",
-];
+type SpeakingMode = "practice" | "shadowing" | "guide";
 
 const PHONEME_CORRECTION_GUIDES = [
   {
@@ -139,7 +125,7 @@ function compareHanziTranscript(
 }
 
 function getSubDifficulty(
-  item: SpeakingSentence,
+  item: { subDifficulty?: SubDifficulty },
   idx: number,
   total: number
 ): SubDifficulty {
@@ -150,9 +136,14 @@ function getSubDifficulty(
 }
 
 export default function SpeakingPage() {
+  const [mode, setMode] = useState<SpeakingMode>("practice");
   const [selectedLevel, setSelectedLevel] = useState<"ALL" | HSKLevel | "HSK7-9">("ALL");
   const [selectedSubFilter, setSelectedSubFilter] = useState<SubFilter>("all");
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [shadowLessons, setShadowLessons] = useState<SpeakingShadowingLesson[]>([]);
+  const [isLoadingShadow, setIsLoadingShadow] = useState(false);
+  const [selectedShadowLessonId, setSelectedShadowLessonId] = useState("");
+  const [shadowSentenceIndex, setShadowSentenceIndex] = useState(0);
   const [showPinyin, setShowPinyin] = useState(true);
   const [supported, setSupported] = useState(true);
   const [isListening, setIsListening] = useState(false);
@@ -160,6 +151,7 @@ export default function SpeakingPage() {
   const [spokenText, setSpokenText] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [xpAwarded, setXpAwarded] = useState<number | null>(null);
+  const [completedIds, setCompletedIds] = useState<Record<string, boolean>>({});
 
   const recognizerRef = useRef<SpeechRecognitionInstance | null>(null);
 
@@ -170,6 +162,37 @@ export default function SpeakingPage() {
       stopSpeaking();
     };
   }, []);
+
+  useEffect(() => {
+    if (mode !== "shadowing") return;
+    let cancelled = false;
+    setIsLoadingShadow(true);
+    loadSpeakingExtraByLevel(selectedLevel)
+      .then((loaded) => {
+        if (!cancelled) setShadowLessons(loaded);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingShadow(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, selectedLevel]);
+
+  const filteredShadowLessons = useMemo<SpeakingShadowingLesson[]>(() => {
+    if (selectedSubFilter === "all") return shadowLessons;
+    return shadowLessons.filter(
+      (l, idx) =>
+        getSubDifficulty(l, idx, shadowLessons.length) === selectedSubFilter
+    );
+  }, [shadowLessons, selectedSubFilter]);
+
+  const activeShadowLesson = useMemo<SpeakingShadowingLesson | undefined>(
+    () =>
+      filteredShadowLessons.find((l) => l.id === selectedShadowLessonId) ??
+      filteredShadowLessons[0],
+    [filteredShadowLessons, selectedShadowLessonId]
+  );
 
   const levelSentences = useMemo<SpeakingSentence[]>(
     () =>
@@ -183,23 +206,6 @@ export default function SpeakingPage() {
     [selectedLevel]
   );
 
-  const basicCount = useMemo(
-    () =>
-      levelSentences.filter(
-        (s, idx) => getSubDifficulty(s, idx, levelSentences.length) === "basic"
-      ).length,
-    [levelSentences]
-  );
-
-  const advancedCount = useMemo(
-    () =>
-      levelSentences.filter(
-        (s, idx) =>
-          getSubDifficulty(s, idx, levelSentences.length) === "advanced"
-      ).length,
-    [levelSentences]
-  );
-
   const filteredSentences = useMemo<SpeakingSentence[]>(() => {
     if (selectedSubFilter === "all") return levelSentences;
     return levelSentences.filter(
@@ -208,29 +214,37 @@ export default function SpeakingPage() {
     );
   }, [levelSentences, selectedSubFilter]);
 
+  const activeSentences =
+    mode === "shadowing"
+      ? activeShadowLesson?.sentences ?? []
+      : filteredSentences;
+
+  const activeIndex = mode === "shadowing" ? shadowSentenceIndex : currentIndex;
+  const safeIndex = Math.min(
+    activeIndex,
+    Math.max(0, activeSentences.length - 1)
+  );
   const currentSentence =
-    filteredSentences[currentIndex] ??
-    filteredSentences[0] ??
-    SPEAKING_SENTENCES[0];
+    mode === "shadowing"
+      ? activeSentences[safeIndex]
+      : activeSentences[safeIndex] ?? SPEAKING_SENTENCES[0];
+
+  const completedIndices = useMemo(() => {
+    const set = new Set<number>();
+    activeSentences.forEach((s, idx) => {
+      if (completedIds[s.id]) set.add(idx);
+    });
+    return set;
+  }, [activeSentences, completedIds]);
 
   const resetPractice = () => {
     recognizerRef.current?.abort();
+    stopSpeaking();
     setIsListening(false);
+    setIsSpeakingModel(false);
     setSpokenText("");
     setErrorMsg(null);
     setXpAwarded(null);
-  };
-
-  const handleSubFilterChange = (sub: SubFilter) => {
-    setSelectedSubFilter(sub);
-    setCurrentIndex(0);
-    resetPractice();
-  };
-
-  const handleLevelChange = (lvl: "ALL" | HSKLevel | "HSK7-9") => {
-    setSelectedLevel(lvl);
-    setCurrentIndex(0);
-    resetPractice();
   };
 
   const handlePlayModel = (rate: number) => {
@@ -238,6 +252,16 @@ export default function SpeakingPage() {
     stopSpeaking();
     setIsSpeakingModel(true);
     speakChinese(currentSentence.hanzi, rate, () => {
+      setIsSpeakingModel(false);
+    });
+  };
+
+  const handlePlayWholeShadowLesson = () => {
+    if (!activeShadowLesson) return;
+    stopSpeaking();
+    setIsSpeakingModel(true);
+    const fullText = activeShadowLesson.sentences.map((s) => s.hanzi).join(" ");
+    speakChinese(fullText, 0.95, () => {
       setIsSpeakingModel(false);
     });
   };
@@ -253,6 +277,7 @@ export default function SpeakingPage() {
       markLessonCompleted(currentSentence.id, "speaking", 8, reward);
       if (accuracy === 100) addXP(5);
       setXpAwarded(accuracy === 100 ? reward + 5 : reward);
+      setCompletedIds((prev) => ({ ...prev, [currentSentence.id]: true }));
     }
   };
 
@@ -315,7 +340,6 @@ export default function SpeakingPage() {
     const hanziChars = Array.from(String(currentSentence.hanzi)).filter((ch) =>
       /\p{Script=Han}/u.test(ch)
     );
-    // Simulate ~85% matched characters so user can see both green (#15803D) and red (#B91C1C) heatmap
     const skipIndex =
       hanziChars.length > 3 ? Math.floor(hanziChars.length / 2) : -1;
     const simulated = hanziChars
@@ -331,61 +355,133 @@ export default function SpeakingPage() {
       ? compareHanziTranscript(currentSentence.hanzi, spokenText)
       : null;
 
-  return (
-    <div className="mx-auto max-w-5xl space-y-4 pb-12">
-      {/* Compact Header */}
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Mic className="h-4 w-4 text-brand" />
-          <h1 className="text-lg font-bold tracking-tight text-[#262626] sm:text-xl">
-            Luyện Nói &amp; Shadowing
-          </h1>
-          <span className="hidden text-xs font-medium text-[#737373] sm:inline">
-            口语 · zh-CN
-          </span>
-        </div>
-        <span className="text-xs text-[#737373]">
-          Nghe mẫu 1.0x / 0.75x &amp; chấm điểm từng chữ Hán
-        </span>
-      </div>
+  const sidebarLessons: SkillFocusLessonItem[] = useMemo(() => {
+    if (mode === "shadowing") {
+      return filteredShadowLessons.map((lesson) => {
+        const allDone =
+          lesson.sentences.length > 0 &&
+          lesson.sentences.every((s) => Boolean(completedIds[s.id]));
+        return {
+          id: lesson.id,
+          title: lesson.titleZh
+            ? `${lesson.titleZh} · ${lesson.title}`
+            : lesson.title,
+          badge: lesson.level,
+          subtitle: lesson.topic,
+          meta: `${lesson.sentences.length} câu`,
+          completed: allDone,
+        };
+      });
+    }
+    return filteredSentences.map((s) => ({
+      id: s.id,
+      title: s.hanzi,
+      badge: s.level,
+      subtitle: s.topic,
+      completed: Boolean(completedIds[s.id]),
+    }));
+  }, [mode, filteredShadowLessons, filteredSentences, completedIds]);
 
-      {/* Unified Single-Row Filter & Settings Bar */}
-      <UnifiedFilterBar
-        hskLevel={selectedLevel}
-        onHskLevelChange={(lvl) =>
-          handleLevelChange(lvl as "ALL" | HSKLevel | "HSK7-9")
-        }
-        allowAllLevel
-        difficulty={selectedSubFilter}
-        onDifficultyChange={(val) =>
-          handleSubFilterChange(val as "all" | SubDifficulty)
-        }
-        difficultyOptions={[
-          {
-            value: "all",
-            label: `Tất cả mức (${levelSentences.length})`,
-            shortLabel: "Độ khó",
-          },
-          {
-            value: "basic",
-            label: `Cơ bản (${basicCount})`,
-            shortLabel: "Cơ bản",
-          },
-          {
-            value: "advanced",
-            label: `Nâng cao (${advancedCount})`,
-            shortLabel: "Nâng cao",
-          },
-        ]}
-        rightSlot={
-          <span className="whitespace-nowrap text-[11px] font-medium text-[#737373]">
-            {filteredSentences.length} câu
-          </span>
-        }
-        settingsBadge={showPinyin ? "Pinyin" : undefined}
-        settingsAriaLabel="Cài đặt luyện nói"
-        settingsContent={
-          <label className="flex cursor-pointer items-center justify-between text-xs font-semibold text-[#4A4540]">
+  const shadowManifestPending = useMemo(() => {
+    if (!isLoadingShadow) return "";
+    const count =
+      selectedLevel === "ALL"
+        ? SPEAKING_EXTRA_TOTAL
+        : selectedLevel === "HSK7-9"
+          ? SPEAKING_EXTRA_MANIFEST.HSK7 +
+            SPEAKING_EXTRA_MANIFEST.HSK8 +
+            SPEAKING_EXTRA_MANIFEST.HSK9
+          : SPEAKING_EXTRA_MANIFEST[selectedLevel] ?? 0;
+    return count > 0 ? ` (+${count} đang tải...)` : "";
+  }, [isLoadingShadow, selectedLevel]);
+
+  return (
+    <SkillFocusLayout
+      backHref="/roadmap"
+      hskLevel={selectedLevel}
+      onHskLevelChange={(lvl) => {
+        setSelectedLevel(lvl as "ALL" | HSKLevel | "HSK7-9");
+        setCurrentIndex(0);
+        setShadowSentenceIndex(0);
+        resetPractice();
+      }}
+      allowAllLevel
+      currentTitle={
+        mode === "shadowing"
+          ? activeShadowLesson
+            ? `${activeShadowLesson.titleZh} — ${activeShadowLesson.title}`
+            : "Shadowing theo bài"
+          : mode === "practice"
+            ? currentSentence
+              ? `Luyện Nói · ${currentSentence.topic}`
+              : "Luyện Nói & Shadowing"
+            : "Cẩm nang sửa thanh điệu & âm bật hơi"
+      }
+      modeSlot={
+        <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
+          {(
+            [
+              { id: "practice" as const, label: "Câu lẻ" },
+              { id: "shadowing" as const, label: `Shadowing (+${SPEAKING_EXTRA_TOTAL})` },
+              { id: "guide" as const, label: "Cẩm nang âm" },
+            ]
+          ).map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => {
+                setMode(m.id);
+                resetPractice();
+              }}
+              className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+                mode === m.id
+                  ? "bg-white text-brand-active shadow-2xs ring-1 ring-brand/60"
+                  : "text-[#737373] hover:text-[#262626]"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      }
+      settingsBadge={showPinyin ? "Pinyin" : undefined}
+      settingsAriaLabel="Cài đặt luyện nói"
+      settingsContent={
+        <>
+          <div className="space-y-1.5">
+            <span className="block text-xs font-semibold text-[#4A4540]">
+              Độ khó con
+            </span>
+            <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
+              {(
+                [
+                  { id: "all" as const, label: "Tất cả" },
+                  { id: "basic" as const, label: "Cơ bản" },
+                  { id: "advanced" as const, label: "Nâng cao" },
+                ]
+              ).map((sub) => (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedSubFilter(sub.id);
+                    setCurrentIndex(0);
+                    setShadowSentenceIndex(0);
+                    resetPractice();
+                  }}
+                  className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+                    selectedSubFilter === sub.id
+                      ? "bg-white text-brand-active ring-1 ring-brand"
+                      : "text-[#737373] hover:text-[#262626]"
+                  }`}
+                >
+                  {sub.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="flex cursor-pointer items-center justify-between border-t border-[#F2F2F0] pt-2.5 text-xs font-semibold text-[#4A4540]">
             <span className="inline-flex items-center gap-1.5">
               <Languages className="h-3.5 w-3.5" /> Hiện phiên âm Pinyin
             </span>
@@ -405,290 +501,274 @@ export default function SpeakingPage() {
               />
             </button>
           </label>
+        </>
+      }
+      sidebarTitle={mode === "shadowing" ? "Bài Shadowing" : "Danh sách câu nói"}
+      sidebarSummary={
+        mode === "shadowing"
+          ? `${formatUnifiedHSKLabel(selectedLevel)} · ${filteredShadowLessons.length} bài${shadowManifestPending}`
+          : `${formatUnifiedHSKLabel(selectedLevel)} · ${filteredSentences.length} câu`
+      }
+      lessons={sidebarLessons}
+      activeLessonId={
+        mode === "shadowing"
+          ? activeShadowLesson?.id ?? ""
+          : currentSentence?.id ?? ""
+      }
+      onSelectLesson={(id) => {
+        if (mode === "shadowing") {
+          setSelectedShadowLessonId(id);
+          setShadowSentenceIndex(0);
+          resetPractice();
+          return;
         }
-      />
-
-      {/* Unsupported Browser Notice */}
-      {!supported && (
-        <div className="flex flex-col gap-3 rounded-2xl border border-[#E5E5E0] bg-[#FAF9F7] p-4 text-sm text-[#262626] sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-2.5">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-[#6B655E]" />
-            <div>
-              <p className="font-semibold">
-                Trình duyệt hiện tại chưa hỗ trợ Web Speech Recognition (zh-CN).
-              </p>
-              <p className="text-xs text-[#737373]">
-                Hãy dùng Google Chrome / Microsoft Edge để thu âm trực tiếp, hoặc bấm &ldquo;Thử mô phỏng phát âm&rdquo; để xem chấm điểm Heatmap từng chữ Hán.
-              </p>
+        const idx = filteredSentences.findIndex((s) => s.id === id);
+        if (idx !== -1) {
+          setCurrentIndex(idx);
+          setMode("practice");
+          resetPractice();
+        }
+      }}
+      audioSlot={
+        (mode === "practice" || mode === "shadowing") && currentSentence ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => handlePlayModel(1.0)}
+                disabled={isSpeakingModel}
+              >
+                <Volume2 className="h-4 w-4" />
+                Nghe mẫu (1.0x)
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handlePlayModel(0.75)}
+                disabled={isSpeakingModel}
+              >
+                <Volume2 className="h-4 w-4 text-[#6B655E]" />
+                0.75x Chậm
+              </Button>
+              {mode === "shadowing" && activeShadowLesson && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePlayWholeShadowLesson}
+                  disabled={isSpeakingModel}
+                >
+                  <Volume2 className="h-4 w-4 text-[#6B655E]" />
+                  Nghe cả bài
+                </Button>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Badge variant="accent">{currentSentence.level}</Badge>
+              <Badge variant="outline">{currentSentence.topic}</Badge>
+              {currentSentence.focusTones?.map((tone) => (
+                <span
+                  key={tone}
+                  className="rounded-full bg-[#EFEFEA] px-2.5 py-0.5 text-[11px] font-semibold text-[#6B655E]"
+                >
+                  {tone}
+                </span>
+              ))}
             </div>
           </div>
-          <Button size="sm" variant="secondary" onClick={handleDemoSimulation}>
-            <Wand2 className="h-4 w-4" />
-            Thử mô phỏng phát âm
-          </Button>
-        </div>
-      )}
-
-      {/* Progress & Prev/Next Navigation */}
-      {currentSentence && (
-        <>
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex-1">
-              <Progress
-                value={
-                  ((currentIndex + 1) / Math.max(1, filteredSentences.length)) *
-                  100
+        ) : undefined
+      }
+      shortcutHint={
+        mode === "practice" || mode === "shadowing"
+          ? "Nghe mẫu 1.0x hoặc 0.75x rồi nhấn Micro để thu âm & chấm điểm từng chữ Hán"
+          : undefined
+      }
+      pagination={
+        mode === "practice" || mode === "shadowing"
+          ? {
+              currentIndex: safeIndex,
+              total: activeSentences.length,
+              onPrev: () => {
+                if (mode === "shadowing") {
+                  setShadowSentenceIndex((i) => Math.max(0, i - 1));
+                } else {
+                  setCurrentIndex((i) => Math.max(0, i - 1));
                 }
-                label={`Câu ${currentIndex + 1} / ${filteredSentences.length}`}
-                showPercent
-                size="sm"
+                resetPractice();
+              },
+              onNext: () => {
+                if (mode === "shadowing") {
+                  setShadowSentenceIndex((i) =>
+                    Math.min(activeSentences.length - 1, i + 1)
+                  );
+                } else {
+                  setCurrentIndex((i) =>
+                    Math.min(activeSentences.length - 1, i + 1)
+                  );
+                }
+                resetPractice();
+              },
+              onJump: (idx) => {
+                if (mode === "shadowing") {
+                  setShadowSentenceIndex(idx);
+                } else {
+                  setCurrentIndex(idx);
+                }
+                resetPractice();
+              },
+              itemLabel: "Câu",
+              completedIndices,
+            }
+          : undefined
+      }
+    >
+      {(mode === "practice" || mode === "shadowing") && currentSentence ? (
+        <div className="space-y-6">
+          {mode === "shadowing" && activeShadowLesson && (
+            <div className="rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-4 py-2.5 text-xs text-[#57534E]">
+              <span className="font-semibold text-[#262626]">
+                {activeShadowLesson.titleZh} — {activeShadowLesson.title}:{" "}
+              </span>
+              {activeShadowLesson.descriptionVi}
+            </div>
+          )}
+          {!supported && (
+            <div className="flex flex-col gap-3 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-3.5 text-xs text-[#262626] sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#6B655E]" />
+                <span>
+                  Trình duyệt chưa hỗ trợ Web Speech Recognition (zh-CN). Dùng
+                  Chrome/Edge hoặc bấm &ldquo;Thử mô phỏng phát âm&rdquo;.
+                </span>
+              </div>
+              <Button size="sm" variant="secondary" onClick={handleDemoSimulation}>
+                <Wand2 className="h-3.5 w-3.5" />
+                Mô phỏng
+              </Button>
+            </div>
+          )}
+
+          {/* Target Sentence */}
+          <div className="space-y-2.5 py-2 text-center">
+            {showPinyin && currentSentence.pinyin && (
+              <p className="font-mono text-base font-medium text-[#6B655E] sm:text-lg">
+                {currentSentence.pinyin}
+              </p>
+            )}
+
+            <div className="text-2xl font-bold leading-relaxed text-[#262626] sm:text-3xl">
+              <InteractiveChineseText
+                text={currentSentence.hanzi}
+                pinyin={currentSentence.pinyin}
               />
             </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={currentIndex === 0}
-                onClick={() => {
-                  setCurrentIndex((i) => Math.max(0, i - 1));
-                  resetPractice();
-                }}
-              >
-                <ChevronLeft className="h-4 w-4" />
-                Trước
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={currentIndex >= filteredSentences.length - 1}
-                onClick={() => {
-                  setCurrentIndex((i) =>
-                    Math.min(filteredSentences.length - 1, i + 1)
-                  );
-                  resetPractice();
-                }}
-              >
-                Tiếp
-                <ChevronRight className="h-4 w-4" />
-              </Button>
+
+            <p className="text-sm font-medium text-[#737373]">
+              {currentSentence.meaningVi}
+            </p>
+
+            {currentSentence.tipVi && (
+              <p className="mx-auto max-w-xl rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-4 py-2 text-xs leading-relaxed text-[#57534E]">
+                <span className="font-semibold text-[#262626]">Mẹo phát âm: </span>
+                {currentSentence.tipVi}
+              </p>
+            )}
+          </div>
+
+          {/* Microphone Controls */}
+          <div className="flex flex-col items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleToggleMic}
+              disabled={!supported}
+              className={`flex h-20 w-20 cursor-pointer items-center justify-center rounded-full shadow-sm transition-all disabled:opacity-50 ${
+                isListening
+                  ? "animate-pulse bg-[#B91C1C] text-white ring-8 ring-[#B91C1C]/20"
+                  : "bg-brand text-white hover:scale-105 hover:bg-brand-hover active:scale-95"
+              }`}
+              aria-label={isListening ? "Dừng ghi âm" : "Bắt đầu ghi âm"}
+            >
+              {isListening ? (
+                <MicOff className="h-8 w-8" />
+              ) : (
+                <Mic className="h-8 w-8" />
+              )}
+            </button>
+            <p className="text-xs font-medium text-[#737373]">
+              {isListening
+                ? "Đang lắng nghe tiếng Trung (zh-CN)... Nhấn để dừng"
+                : "Nhấn Micro và đọc to câu trên"}
+            </p>
+            <Button variant="ghost" size="sm" onClick={handleDemoSimulation}>
+              <Wand2 className="h-3.5 w-3.5" />
+              Thử mô phỏng phát âm
+            </Button>
+          </div>
+
+          {errorMsg && (
+            <div className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] p-3 text-center text-xs font-medium text-[#B91C1C]">
+              {errorMsg}
             </div>
-          </div>
+          )}
 
-          {/* Main Practice Card */}
-          <Card className="overflow-hidden">
-            <CardHeader className="border-b border-[#E5E5E0] bg-[#FAF9F7]">
+          {/* Pronunciation Heatmap */}
+          {comparison && (
+            <div className="space-y-3.5 rounded-2xl border border-[#E5E5E0] bg-[#FAF9F7] p-4 sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="accent">{currentSentence.level}</Badge>
-                  <Badge variant="default">
-                    {currentSentence.subDifficulty === "advanced"
-                      ? "Nâng cao"
-                      : "Cơ bản"}
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
+                    Độ chính xác từng chữ Hán
+                  </p>
+                  <p className="text-xl font-bold text-[#262626]">
+                    {comparison.accuracy}%{" "}
+                    <span className="text-xs font-normal text-[#737373]">
+                      ({comparison.hanziMatched}/{comparison.hanziTotal} chữ khớp)
+                    </span>
+                  </p>
+                </div>
+                {xpAwarded !== null && (
+                  <Badge variant="success" className="gap-1 px-2.5 py-1 text-xs">
+                    <Sparkles className="h-3.5 w-3.5" />+{xpAwarded} XP
                   </Badge>
-                  <Badge variant="outline">{currentSentence.topic}</Badge>
-                  {currentSentence.focusTones?.map((tone) => (
+                )}
+              </div>
+
+              <Progress value={comparison.accuracy} size="sm" />
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                {comparison.chars.map((item, idx) =>
+                  !item.isHanzi ? (
                     <span
-                      key={tone}
-                      className="rounded-full bg-[#EFEFEA] px-2.5 py-0.5 text-[11px] font-semibold text-[#6B655E]"
+                      key={idx}
+                      className="px-1 text-lg font-medium text-[#737373]"
                     >
-                      Trọng tâm: {tone}
+                      {item.char}
                     </span>
-                  ))}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePlayModel(0.75)}
-                    disabled={isSpeakingModel}
-                  >
-                    <Volume2 className="h-4 w-4 text-[#6B655E]" />
-                    0.75x (Chậm)
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => handlePlayModel(1.0)}
-                    disabled={isSpeakingModel}
-                  >
-                    <Volume2 className="h-4 w-4" />
-                    Nghe mẫu (1.0x)
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-
-            <CardContent className="space-y-6 p-6">
-              {/* Target Chinese Sentence */}
-              <div className="space-y-2.5 text-center">
-                <p className="text-xs font-medium uppercase tracking-wider text-[#737373]">
-                  Câu chữ Hán cần đọc (nhấp vào chữ bất kỳ để tra Pinyin, Bộ thủ &amp; Số nét)
-                </p>
-
-                {showPinyin && currentSentence.pinyin && (
-                  <p className="font-mono text-base font-medium text-[#6B655E] sm:text-lg">
-                    {currentSentence.pinyin}
-                  </p>
-                )}
-
-                <div className="text-2xl font-bold leading-relaxed text-[#262626] sm:text-3xl">
-                  <InteractiveChineseText
-                    text={currentSentence.hanzi}
-                    pinyin={currentSentence.pinyin}
-                  />
-                </div>
-
-                <p className="text-sm font-medium text-[#737373]">
-                  {currentSentence.meaningVi}
-                </p>
-
-                {currentSentence.tipVi && (
-                  <p className="mx-auto max-w-2xl rounded-xl border border-[#E5E5E0] bg-[#F2F2F0]/70 px-4 py-2.5 text-xs leading-relaxed text-[#57534E]">
-                    <span className="font-semibold text-[#262626]">
-                      Hướng dẫn phát âm &amp; thanh điệu:{" "}
-                    </span>
-                    {currentSentence.tipVi}
-                  </p>
-                )}
-              </div>
-
-              {/* Microphone Recording Button */}
-              <div className="flex flex-col items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleToggleMic}
-                  disabled={!supported}
-                  className={`flex h-20 w-20 cursor-pointer items-center justify-center rounded-full shadow-sm transition-all disabled:opacity-50 ${
-                    isListening
-                      ? "animate-pulse bg-[#B91C1C] text-white ring-8 ring-[#B91C1C]/20"
-                      : "bg-[#292524] text-white hover:scale-105 hover:bg-[#4A4540] active:scale-95"
-                  }`}
-                  aria-label={isListening ? "Dừng ghi âm" : "Bắt đầu ghi âm"}
-                >
-                  {isListening ? (
-                    <MicOff className="h-8 w-8" />
                   ) : (
-                    <Mic className="h-8 w-8" />
-                  )}
-                </button>
-                <p className="text-xs font-medium text-[#737373]">
-                  {isListening
-                    ? "Đang lắng nghe tiếng Trung (zh-CN)... Nhấn để dừng"
-                    : "Nhấn vào Micro và đọc to câu tiếng Trung ở trên"}
-                </p>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleDemoSimulation}
-                >
-                  <Wand2 className="h-3.5 w-3.5" />
-                  Thử mô phỏng phát âm
-                </Button>
+                    <span
+                      key={idx}
+                      style={{ color: item.matched ? "#15803D" : "#B91C1C" }}
+                      className={`inline-flex h-10 min-w-10 items-center justify-center rounded-xl border px-2.5 text-lg font-bold ${
+                        item.matched
+                          ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D]"
+                          : "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]"
+                      }`}
+                    >
+                      {item.char}
+                    </span>
+                  )
+                )}
               </div>
 
-              {errorMsg && (
-                <div className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] p-3 text-center text-xs font-medium text-[#B91C1C]">
-                  {errorMsg}
-                </div>
-              )}
-
-              {/* Word-Level Pronunciation Heatmap */}
-              {comparison && (
-                <div className="space-y-4 rounded-2xl border border-[#E5E5E0] bg-[#FAF9F7] p-5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wider text-[#737373]">
-                        Word-Level Pronunciation Heatmap
-                      </p>
-                      <p className="mt-0.5 text-2xl font-bold text-[#262626]">
-                        {comparison.accuracy}%{" "}
-                        <span className="text-sm font-normal text-[#737373]">
-                          ({comparison.hanziMatched}/{comparison.hanziTotal} chữ Hán chuẩn xác)
-                        </span>
-                      </p>
-                    </div>
-                    {xpAwarded !== null && (
-                      <Badge
-                        variant="success"
-                        className="gap-1 px-3 py-1 text-xs"
-                      >
-                        <Sparkles className="h-3.5 w-3.5" />+{xpAwarded} XP
-                      </Badge>
-                    )}
-                  </div>
-
-                  <Progress value={comparison.accuracy} size="md" />
-
-                  <div>
-                    <p className="mb-2.5 text-xs font-medium text-[#737373]">
-                      Bản đồ nhiệt từng chữ Hán (Màu xanh{" "}
-                      <span className="font-semibold text-[#15803D]">
-                        #15803D = Phát âm khớp
-                      </span>
-                      , màu đỏ{" "}
-                      <span className="font-semibold text-[#B91C1C]">
-                        #B91C1C = Phát âm sai / thiếu thanh điệu
-                      </span>
-                      ):
-                    </p>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {comparison.chars.map((item, idx) => {
-                        if (!item.isHanzi) {
-                          return (
-                            <span
-                              key={idx}
-                              className="px-1 text-lg font-medium text-[#737373]"
-                            >
-                              {item.char}
-                            </span>
-                          );
-                        }
-                        return (
-                          <span
-                            key={idx}
-                            style={{
-                              color: item.matched ? "#15803D" : "#B91C1C",
-                            }}
-                            className={`inline-flex h-10 min-w-10 items-center justify-center rounded-xl border px-2.5 text-lg font-bold transition-all ${
-                              item.matched
-                                ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D]"
-                                : "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]"
-                            }`}
-                          >
-                            {item.char}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-[#E5E5E0] bg-white p-3 text-xs text-[#737373]">
-                    <span className="font-semibold text-[#262626]">
-                      Hệ thống nhận diện (zh-CN):{" "}
-                    </span>
-                    &ldquo;{spokenText}&rdquo;
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
-
-      {/* Detailed Tone & Aspiration Phoneme Correction Guide */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <BookOpen className="h-4 w-4 text-[#6B655E]" />
-            <CardTitle className="text-base">
-              Cẩm nang sửa thanh điệu &amp; âm bật hơi tiếng Trung cho người Việt
-            </CardTitle>
-          </div>
-          <CardDescription>
-            Khắc phục triệt để 4 nhóm âm khó nhất khi nói tiếng Trung Phổ thông: j/q/x, zh/ch/sh/r, z/c/s và biến điệu thanh 3.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-3.5 md:grid-cols-2">
+              <div className="rounded-xl border border-[#E5E5E0] bg-white px-3 py-2 text-xs text-[#737373]">
+                <span className="font-semibold text-[#262626]">Nhận diện: </span>
+                &ldquo;{spokenText}&rdquo;
+              </div>
+            </div>
+          )}
+        </div>
+      ) : mode === "guide" ? (
+        <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2">
           {PHONEME_CORRECTION_GUIDES.map((guide) => (
             <div
               key={guide.id}
@@ -710,63 +790,14 @@ export default function SpeakingPage() {
               </p>
             </div>
           ))}
-        </CardContent>
-      </Card>
-
-      {/* Quick Sentence Picker */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Danh sách câu luyện nói ({filteredSentences.length} câu)
-          </CardTitle>
-          <CardDescription>
-            Chọn bất kỳ câu nào từ Mức 0 đến HSK 9 để luyện phát âm trực tiếp.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          {filteredSentences.map((s, idx) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => {
-                setCurrentIndex(idx);
-                resetPractice();
-              }}
-              className={`flex cursor-pointer items-start justify-between gap-2 rounded-xl border p-3 text-left transition-all ${
-                idx === currentIndex
-                  ? "border-[#6B655E] bg-[#F2F2F0]"
-                  : "border-[#E5E5E0] bg-white hover:border-[#A8A29E]"
-              }`}
-            >
-              <div className="min-w-0 space-y-0.5">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <Badge variant="outline">{s.level}</Badge>
-                  <span className="text-[11px] font-medium text-[#6B655E]">
-                    {s.subDifficulty === "advanced" ? "Nâng cao" : "Cơ bản"}
-                  </span>
-                  <span className="text-xs text-[#737373]">· {s.topic}</span>
-                </div>
-                <p className="truncate text-sm font-semibold text-[#262626]">
-                  {s.hanzi}
-                </p>
-                {showPinyin && (
-                  <p className="truncate font-mono text-[11px] text-[#6B655E]">
-                    {s.pinyin}
-                  </p>
-                )}
-              </div>
-              {idx === currentIndex && (
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#6B655E]" />
-              )}
-            </button>
-          ))}
-        </CardContent>
-      </Card>
-
-      <ResourceBanner
-        resources={getResourcesByCategory(["pronunciation"])}
-        heading="Video tự học phát âm tiếng Trung chuẩn bản xứ (Google Drive)"
-      />
-    </div>
+        </div>
+      ) : (
+        <p className="py-10 text-center text-sm text-[#737373]">
+          {isLoadingShadow
+            ? "Đang tải bài Shadowing cho cấp độ này..."
+            : "Chưa có bài luyện nói phù hợp với bộ lọc hiện tại."}
+        </p>
+      )}
+    </SkillFocusLayout>
   );
 }

@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
-  ChevronRight,
   Eye,
   EyeOff,
   FileText,
+  Layers,
   Lightbulb,
   PenTool,
   Puzzle,
@@ -23,28 +23,38 @@ import {
   WRITING_PROMPTS,
   type HanziStrokeTemplate,
 } from "@/data/chinese/writing";
+import {
+  loadWritingExtraByFilter,
+  type ThemedWritingSet,
+} from "@/data/skills/writing";
 import { getOfflineDictionaryEntries } from "@/data/chinese/dictionary";
 import { HanziStrokeCanvas } from "@/components/writing/HanziStrokeCanvas";
 import { TwoSentenceBuilder } from "@/components/writing/TwoSentenceBuilder";
 import { InteractiveChineseText } from "@/components/dictionary/InteractiveChineseText";
-import { UnifiedFilterBar } from "@/components/ui/UnifiedFilterBar";
+import {
+  SkillFocusLayout,
+  type SkillFocusLessonItem,
+} from "@/components/ui/SkillFocusLayout";
+import { formatUnifiedHSKLabel } from "@/components/ui/UnifiedFilterBar";
 import { speakChinese } from "@/lib/speech";
 import { addXP, markLessonCompleted, recordMistake } from "@/lib/storage";
 import type { DictionaryEntry, HSKLevel, SubDifficulty } from "@/types";
 
-type WritingTab = "stroke" | "two-sentences" | "sentence-order" | "essay";
+type WritingTab = "stroke" | "themed" | "two-sentences" | "sentence-order" | "essay";
 type SubFilter = "all" | SubDifficulty;
 
-const HSK_LEVELS: Array<HSKLevel | "HSK7-9"> = [
-  "HSK0",
-  "HSK1",
-  "HSK2",
-  "HSK3",
-  "HSK4",
-  "HSK5",
-  "HSK6",
-  "HSK7-9",
-];
+const HSK_ORDER_MAP: Record<HSKLevel, number> = {
+  HSK0: 0,
+  HSK1: 1,
+  HSK2: 2,
+  HSK3: 3,
+  HSK4: 4,
+  HSK5: 5,
+  HSK6: 6,
+  HSK7: 7,
+  HSK8: 8,
+  HSK9: 9,
+};
 
 interface SentenceOrderItemNormalized {
   id: string;
@@ -100,7 +110,6 @@ function analyzeChineseWriting(
   const trimmed = text.trim();
   if (!trimmed) return issues;
 
-  // 1. Detect "是...很..." before adjectives (classic Vietnamese learner error: "是很好", "是很忙", "是很大", "是很重要")
   const shiHenMatch = trimmed.match(/是(很|非常|太|真)([\u4e00-\u9fff]{1,2})/);
   if (shiHenMatch) {
     const [full, adv, adj] = shiHenMatch;
@@ -114,7 +123,6 @@ function analyzeChineseWriting(
     });
   }
 
-  // 2. Detect "不有" instead of "没有"
   if (trimmed.includes("不有")) {
     issues.push({
       id: "bu-you",
@@ -127,7 +135,6 @@ function analyzeChineseWriting(
     });
   }
 
-  // 3. Detect "二 + lượng từ" instead of "两 + lượng từ" (e.g. 二个, 二本, 二件, 二家, 二位, 二杯, 二条, 二张)
   const erMeasureMatch = trimmed.match(
     /二(个|本|件|家|位|杯|条|张|份|次|天|年|批|箱|台)/
   );
@@ -143,7 +150,6 @@ function analyzeChineseWriting(
     });
   }
 
-  // 4. Detect double "了" redundancy or "没...了" conflict (e.g. "没去了", "没有买了")
   const meiLeMatch = trimmed.match(/没(有)?([\u4e00-\u9fff]{1,3})了/);
   if (meiLeMatch) {
     const [full, youPart, verbPart] = meiLeMatch;
@@ -158,7 +164,6 @@ function analyzeChineseWriting(
     });
   }
 
-  // 5. Missing Chinese ending punctuation (。！？)
   if (!/[。！？!?]$/.test(trimmed)) {
     const lastPeriodMatch = trimmed.match(/\.$/);
     issues.push({
@@ -168,11 +173,10 @@ function analyzeChineseWriting(
       original: lastPeriodMatch ? "." : undefined,
       replacement: lastPeriodMatch ? "。" : undefined,
       explanationVi:
-        'Văn bản tiếng Trung chuẩn cần kết thúc câu bằng dấu chấm tròn "。", dấu hỏi "？" hoặc dấu chấm than "！" (không dùng dấu chấm Latinh "." hoặc bỏ trống).',
+        'Văn bản tiếng Trung chuẩn cần kết thúc câu bằng dấu chấm tròn "。", dấu hỏi "？" hoặc dấu chấm than "！".',
     });
   }
 
-  // 6. Required keywords check
   const missingKws = requiredKeywords.filter(
     (kw) => kw.trim() && !trimmed.includes(kw.trim())
   );
@@ -183,18 +187,17 @@ function analyzeChineseWriting(
       severity: "style",
       explanationVi: `Bài viết còn thiếu ${missingKws.length} từ khóa gợi ý: ${missingKws
         .map((k) => `“${k}”`)
-        .join(", ")}. Hãy đưa các từ này vào bài để đạt điểm tối đa.`,
+        .join(", ")}.`,
     });
   }
 
-  // 7. Hanzi character count check
   const hanziCount = countHanziChars(trimmed);
   if (hanziCount < minChars) {
     issues.push({
       id: "hanzi-count",
       category: "Số lượng chữ Hán (字数)",
       severity: "style",
-      explanationVi: `Bài viết hiện có ${hanziCount} chữ Hán, chưa đạt mức tối thiểu ${minChars} chữ Hán (mục tiêu ${targetChars} chữ). Hãy triển khai thêm 1–2 câu để đủ độ dài chuẩn HSK.`,
+      explanationVi: `Bài viết hiện có ${hanziCount} chữ Hán, chưa đạt mức tối thiểu ${minChars} chữ Hán (mục tiêu ${targetChars} chữ).`,
     });
   }
 
@@ -204,20 +207,86 @@ function analyzeChineseWriting(
 export default function WritingPage() {
   const [activeTab, setActiveTab] = useState<WritingTab>("stroke");
 
-  // ==========================================
   // TAB 1: STROKE ORDER CANVAS (米字格)
-  // ==========================================
   const [strokeLevel, setStrokeLevel] = useState<HSKLevel | "ALL" | "HSK7-9">("HSK0");
   const [strokeSubFilter, setStrokeSubFilter] = useState<SubFilter>("all");
   const [selectedCharHanzi, setSelectedCharHanzi] = useState<string>("永");
   const [customHanziInput, setCustomHanziInput] = useState<string>("");
 
+  // MODULAR THEMED WRITING SETS (DYNAMIC IMPORT PER HSK)
+  const [themedLevel, setThemedLevel] = useState<HSKLevel | "ALL" | "HSK7-9">("HSK1");
+  const [selectedSetId, setSelectedSetId] = useState<string>("");
+  const [selectedThemedChar, setSelectedThemedChar] = useState<string>("");
+  const [extraWritingSets, setExtraWritingSets] = useState<ThemedWritingSet[]>([]);
+  const [essayLevel, setEssayLevel] = useState<HSKLevel | "ALL" | "HSK7-9">("ALL");
+
+  const activeExtraLevelFilter: "ALL" | HSKLevel | "HSK7-9" =
+    activeTab === "themed"
+      ? themedLevel
+      : activeTab === "essay"
+        ? essayLevel
+        : strokeLevel;
+
+  useEffect(() => {
+    let cancelled = false;
+    loadWritingExtraByFilter(activeExtraLevelFilter).then((loaded) => {
+      if (!cancelled) {
+        setExtraWritingSets(loaded);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeExtraLevelFilter]);
+
+  const activeThemedSet = useMemo<ThemedWritingSet | undefined>(() => {
+    if (extraWritingSets.length === 0) return undefined;
+    return (
+      extraWritingSets.find((s) => s.id === selectedSetId) ??
+      extraWritingSets[0]
+    );
+  }, [extraWritingSets, selectedSetId]);
+
+  const activeThemedSetIndex = useMemo(() => {
+    if (!activeThemedSet) return 0;
+    const idx = extraWritingSets.findIndex((s) => s.id === activeThemedSet.id);
+    return idx >= 0 ? idx : 0;
+  }, [extraWritingSets, activeThemedSet]);
+
+  const activeThemedCharObj = useMemo(() => {
+    const chars = activeThemedSet?.characters ?? [];
+    return (
+      chars.find((c) => c.hanzi === selectedThemedChar) ?? chars[0]
+    );
+  }, [activeThemedSet, selectedThemedChar]);
+
   const strokeBankList = useMemo<HanziStrokeTemplate[]>(() => {
-    if (Array.isArray(HANZI_STROKE_BANK) && HANZI_STROKE_BANK.length > 0) {
-      return HANZI_STROKE_BANK;
+    const base =
+      Array.isArray(HANZI_STROKE_BANK) && HANZI_STROKE_BANK.length > 0
+        ? HANZI_STROKE_BANK
+        : [];
+    const seen = new Set(base.map((item) => item.hanzi));
+    const merged: HanziStrokeTemplate[] = [...base];
+    for (const set of extraWritingSets) {
+      for (const ch of set.characters) {
+        if (!seen.has(ch.hanzi)) {
+          seen.add(ch.hanzi);
+          merged.push({
+            hanzi: ch.hanzi,
+            pinyin: ch.pinyin,
+            meaningVi: ch.meaningVi,
+            radical: ch.radical,
+            level: set.level,
+            subDifficulty: set.subDifficulty,
+            strokes: [],
+          });
+        }
+      }
     }
-    return [];
-  }, []);
+    return merged.sort(
+      (a, b) => HSK_ORDER_MAP[a.level] - HSK_ORDER_MAP[b.level]
+    );
+  }, [extraWritingSets]);
 
   const filteredStrokeBank = useMemo(() => {
     const byLevel =
@@ -237,24 +306,12 @@ export default function WritingPage() {
     [strokeBankList, selectedCharHanzi]
   );
 
-  const activeStrokeItem = useMemo(() => {
-    return (
-      matchedStrokeItem ??
-      filteredStrokeBank[0] ?? {
-        hanzi: selectedCharHanzi || "永",
-        pinyin: "yǒng",
-        meaningVi: "Vĩnh cửu (Chữ Vĩnh 8 nét chuẩn thư pháp)",
-        radical: "水 (Thủy)",
-        level: "HSK0" as HSKLevel,
-        subDifficulty: "basic" as SubDifficulty,
-        strokes: [],
-      }
-    );
-  }, [matchedStrokeItem, filteredStrokeBank, selectedCharHanzi]);
+  const currentStrokeIndex = useMemo(() => {
+    const idx = filteredStrokeBank.findIndex((i) => i.hanzi === selectedCharHanzi);
+    return idx >= 0 ? idx : 0;
+  }, [filteredStrokeBank, selectedCharHanzi]);
 
-  // ==========================================
-  // TAB 2: TWO-SENTENCE BUILDER (ĐẶT 2 CÂU)
-  // ==========================================
+  // TAB 2: TWO-SENTENCE BUILDER
   const [twoSentLevel, setTwoSentLevel] = useState<HSKLevel | "HSK7-9">("HSK1");
   const allDictEntries = useMemo<DictionaryEntry[]>(
     () => getOfflineDictionaryEntries(),
@@ -262,11 +319,12 @@ export default function WritingPage() {
   );
   const levelVocabEntries = useMemo(
     () =>
-      twoSentLevel === "HSK7-9"
+      (twoSentLevel === "HSK7-9"
         ? allDictEntries.filter(
             (e) => Boolean(e.level && ["HSK7", "HSK8", "HSK9"].includes(e.level))
           )
-        : allDictEntries.filter((e) => e.level === twoSentLevel),
+        : allDictEntries.filter((e) => e.level === twoSentLevel)
+      ).slice(0, 40),
     [allDictEntries, twoSentLevel]
   );
   const [selectedVocabWord, setSelectedVocabWord] = useState<string>("");
@@ -286,9 +344,14 @@ export default function WritingPage() {
     );
   }, [levelVocabEntries, selectedVocabWord]);
 
-  // ==========================================
-  // TAB 3: SENTENCE ORDERING (连词成句)
-  // ==========================================
+  const currentVocabIndex = useMemo(() => {
+    const idx = levelVocabEntries.findIndex(
+      (e) => e.hanzi === activeVocabEntry.hanzi
+    );
+    return idx >= 0 ? idx : 0;
+  }, [levelVocabEntries, activeVocabEntry.hanzi]);
+
+  // TAB 3: SENTENCE ORDERING
   const [soLevel, setSoLevel] = useState<HSKLevel | "ALL" | "HSK7-9">("HSK1");
   const [soSubFilter, setSoSubFilter] = useState<SubFilter>("all");
   const [soIndex, setSoIndex] = useState<number>(0);
@@ -296,9 +359,7 @@ export default function WritingPage() {
   const [soChecked, setSoChecked] = useState<boolean>(false);
   const [soCorrect, setSoCorrect] = useState<boolean>(false);
 
-  const normalizedOrderExercises = useMemo<
-    SentenceOrderItemNormalized[]
-  >(() => {
+  const normalizedOrderExercises = useMemo<SentenceOrderItemNormalized[]>(() => {
     const rawList = (SENTENCE_ORDER_EXERCISES ?? []) as unknown as Array<
       Record<string, unknown>
     >;
@@ -344,10 +405,12 @@ export default function WritingPage() {
     return byLevel.filter((ex) => ex.subDifficulty === soSubFilter);
   }, [normalizedOrderExercises, soLevel, soSubFilter]);
 
+  const safeSoIndex = Math.min(
+    soIndex,
+    Math.max(0, filteredOrderExercises.length - 1)
+  );
   const currentOrderEx =
-    filteredOrderExercises[soIndex] ??
-    filteredOrderExercises[0] ??
-    normalizedOrderExercises[0];
+    filteredOrderExercises[safeSoIndex] ?? normalizedOrderExercises[0];
 
   const builtOrderTokens = currentOrderEx
     ? selectedTileIndices.map((i) => currentOrderEx.scrambledTokens[i])
@@ -361,13 +424,8 @@ export default function WritingPage() {
 
   const handleCheckOrder = () => {
     if (!currentOrderEx) return;
-    const builtStr = builtOrderTokens
-      .join("")
-      .replace(/[，。！？、\s]/g, "");
-    const targetStr = currentOrderEx.correctAnswer.replace(
-      /[，。！？、\s]/g,
-      ""
-    );
+    const builtStr = builtOrderTokens.join("").replace(/[，。！？、\s]/g, "");
+    const targetStr = currentOrderEx.correctAnswer.replace(/[，。！？、\s]/g, "");
     const isRight = builtStr === targetStr;
     setSoChecked(true);
     setSoCorrect(isRight);
@@ -384,33 +442,56 @@ export default function WritingPage() {
     }
   };
 
-  // ==========================================
-  // TAB 4: ESSAY / BUSINESS EMAIL / HSK WRITING
-  // ==========================================
+  // TAB 4: ESSAY / BUSINESS EMAIL
   const normalizedPrompts = useMemo<WritingPromptNormalized[]>(() => {
-    const rawList = (WRITING_PROMPTS ?? []) as unknown as Array<
-      Record<string, unknown>
-    >;
-    return rawList.map((p, idx) => ({
-      id: String(p.id ?? `wp-${idx}`),
-      level: (p.level as HSKLevel) ?? "HSK3",
-      subDifficulty: (p.subDifficulty as SubDifficulty) ?? "basic",
-      title: String(p.title ?? p.titleVi ?? "Đề luyện viết tiếng Trung"),
-      examType: String(p.examType ?? p.category ?? "HSK Viết luận & Thương mại"),
-      scenarioVi: String(p.scenarioVi ?? p.promptVi ?? ""),
-      minChars: Number(p.minChars ?? p.minWords ?? 60),
-      targetChars: Number(p.targetChars ?? p.targetWords ?? 120),
-      keywords: (p.keywords as string[]) ?? [],
-      checklistVi: (p.checklistVi as string[]) ?? [
-        "Sử dụng đúng các từ khóa gợi ý trong bài viết.",
-        "Đúng cấu trúc ngữ pháp câu tiếng Trung (Thời gian/Địa điểm đứng trước động từ).",
-        "Kết thúc câu bằng dấu chấm tròn chữ Hán (。).",
-      ],
-      sampleZh: String(p.sampleZh ?? p.sampleDe ?? ""),
-      samplePinyin: p.samplePinyin ? String(p.samplePinyin) : undefined,
-      sampleVi: String(p.sampleVi ?? ""),
-    }));
-  }, []);
+    const rawList = [
+      ...((WRITING_PROMPTS ?? []) as unknown as Array<Record<string, unknown>>),
+      ...(extraWritingSets.map((s) => s.prompt) as unknown as Array<
+        Record<string, unknown>
+      >),
+    ];
+    const seenIds = new Set<string>();
+    const deduped: WritingPromptNormalized[] = [];
+    rawList.forEach((p, idx) => {
+      const id = String(p.id ?? `wp-${idx}`);
+      if (seenIds.has(id)) return;
+      seenIds.add(id);
+      deduped.push({
+        id,
+        level: (p.level as HSKLevel) ?? "HSK3",
+        subDifficulty: (p.subDifficulty as SubDifficulty) ?? "basic",
+        title: String(p.title ?? p.titleVi ?? "Đề luyện viết tiếng Trung"),
+        examType: String(
+          p.examType ?? p.category ?? "HSK Viết luận & Thương mại"
+        ),
+        scenarioVi: String(p.scenarioVi ?? p.promptVi ?? ""),
+        minChars: Number(p.minChars ?? p.minWords ?? 60),
+        targetChars: Number(p.targetChars ?? p.targetWords ?? 120),
+        keywords: (p.keywords as string[]) ?? [],
+        checklistVi: (p.checklistVi as string[]) ?? [
+          "Sử dụng đúng các từ khóa gợi ý trong bài viết.",
+          "Đúng cấu trúc ngữ pháp câu tiếng Trung.",
+          "Kết thúc câu bằng dấu chấm tròn chữ Hán (。).",
+        ],
+        sampleZh: String(p.sampleZh ?? p.sampleDe ?? ""),
+        samplePinyin: p.samplePinyin ? String(p.samplePinyin) : undefined,
+        sampleVi: String(p.sampleVi ?? ""),
+      });
+    });
+    return deduped.sort(
+      (a, b) => HSK_ORDER_MAP[a.level] - HSK_ORDER_MAP[b.level]
+    );
+  }, [extraWritingSets]);
+
+  const filteredPrompts = useMemo(() => {
+    if (essayLevel === "ALL") return normalizedPrompts;
+    if (essayLevel === "HSK7-9") {
+      return normalizedPrompts.filter((p) =>
+        ["HSK7", "HSK8", "HSK9"].includes(p.level)
+      );
+    }
+    return normalizedPrompts.filter((p) => p.level === essayLevel);
+  }, [normalizedPrompts, essayLevel]);
 
   const [promptId, setPromptId] = useState<string>(
     normalizedPrompts[0]?.id ?? ""
@@ -428,8 +509,11 @@ export default function WritingPage() {
   >({});
 
   const activePrompt =
-    normalizedPrompts.find((p) => p.id === promptId) ?? normalizedPrompts[0];
-
+    filteredPrompts.find((p) => p.id === promptId) ?? filteredPrompts[0];
+  const currentPromptIndex = Math.max(
+    0,
+    filteredPrompts.findIndex((p) => p.id === activePrompt?.id)
+  );
   const currentHanziCount = countHanziChars(essayText);
 
   const handleSelectPrompt = (id: string) => {
@@ -483,43 +567,253 @@ export default function WritingPage() {
     setSavedBanner(true);
   };
 
-  return (
-    <div className="mx-auto max-w-5xl space-y-4 pb-12">
-      {/* Compact Header & 4 Tabs */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-2">
-          <PenTool className="h-4 w-4 text-brand" />
-          <h1 className="text-lg font-bold tracking-tight text-[#262626] sm:text-xl">
-            Luyện Viết Chữ Hán &amp; Đặt Câu
-          </h1>
-          <span className="hidden text-xs font-medium text-[#737373] sm:inline">
-            写作与汉字 · Mức 0 – HSK 9
-          </span>
-        </div>
+  // Compute layout props per tab
+  const currentHskLevel =
+    activeTab === "stroke"
+      ? strokeLevel
+      : activeTab === "themed"
+        ? themedLevel
+        : activeTab === "two-sentences"
+          ? twoSentLevel
+          : activeTab === "sentence-order"
+            ? soLevel
+            : essayLevel;
 
-        <div className="grid grid-cols-2 gap-1 rounded-2xl border border-[#E5E5E0] bg-white p-1 sm:flex sm:flex-wrap">
+  const sidebarLessons: SkillFocusLessonItem[] = useMemo(() => {
+    if (activeTab === "stroke") {
+      return filteredStrokeBank.map((item) => ({
+        id: item.hanzi,
+        title: `${item.hanzi} · ${item.pinyin}`,
+        badge: item.level,
+        subtitle: item.meaningVi,
+      }));
+    }
+    if (activeTab === "themed") {
+      return extraWritingSets.map((set) => ({
+        id: set.id,
+        title: set.titleVi,
+        badge: set.level,
+        subtitle: `${set.topic} · ${set.characters.length} chữ`,
+      }));
+    }
+    if (activeTab === "two-sentences") {
+      return levelVocabEntries.map((entry) => ({
+        id: entry.hanzi,
+        title: `${entry.hanzi} · ${entry.pinyin}`,
+        subtitle: entry.meaningVi.split(";")[0],
+      }));
+    }
+    if (activeTab === "sentence-order") {
+      return filteredOrderExercises.map((ex, idx) => ({
+        id: ex.id,
+        title: ex.promptVi || `Câu ${idx + 1}`,
+        badge: ex.level,
+        subtitle: ex.grammarTopic,
+      }));
+    }
+    return filteredPrompts.map((p) => ({
+      id: p.id,
+      title: p.title,
+      badge: p.level,
+      subtitle: p.examType,
+    }));
+  }, [
+    activeTab,
+    filteredStrokeBank,
+    extraWritingSets,
+    levelVocabEntries,
+    filteredOrderExercises,
+    filteredPrompts,
+  ]);
+
+  const activeLessonId =
+    activeTab === "stroke"
+      ? selectedCharHanzi
+      : activeTab === "themed"
+        ? activeThemedSet?.id ?? ""
+        : activeTab === "two-sentences"
+          ? activeVocabEntry.hanzi
+          : activeTab === "sentence-order"
+            ? currentOrderEx?.id ?? ""
+            : activePrompt?.id ?? "";
+
+  const currentTitle =
+    activeTab === "stroke"
+      ? `Vẽ chữ Hán (米字格) · ${selectedCharHanzi}`
+      : activeTab === "themed"
+        ? activeThemedSet
+          ? `${activeThemedSet.titleVi} · ${activeThemedSet.titleZh}`
+          : "Bộ chữ luyện viết theo chủ đề"
+        : activeTab === "two-sentences"
+          ? `Đặt 2 câu · ${activeVocabEntry.hanzi}`
+          : activeTab === "sentence-order"
+            ? `Sắp xếp câu · ${currentOrderEx?.grammarTopic ?? ""}`
+            : activePrompt?.title ?? "Viết đoạn & Email";
+
+  const sidebarTitle =
+    activeTab === "stroke"
+      ? "Chữ Hán luyện nét"
+      : activeTab === "themed"
+        ? "Bộ chữ theo chủ đề"
+        : activeTab === "two-sentences"
+          ? "Từ vựng đặt câu"
+          : activeTab === "sentence-order"
+            ? "Bài sắp xếp câu"
+            : "Đề viết luận";
+
+  const sidebarSummary = `${formatUnifiedHSKLabel(currentHskLevel)} · ${sidebarLessons.length} mục`;
+
+  const pagination =
+    activeTab === "stroke"
+      ? {
+          currentIndex: currentStrokeIndex,
+          total: filteredStrokeBank.length,
+          onPrev: () => {
+            const prev = filteredStrokeBank[currentStrokeIndex - 1];
+            if (prev) setSelectedCharHanzi(prev.hanzi);
+          },
+          onNext: () => {
+            const next = filteredStrokeBank[currentStrokeIndex + 1];
+            if (next) setSelectedCharHanzi(next.hanzi);
+          },
+          onJump: (idx: number) => {
+            const target = filteredStrokeBank[idx];
+            if (target) setSelectedCharHanzi(target.hanzi);
+          },
+          itemLabel: "Chữ",
+          nextLabel: "Chữ tiếp",
+        }
+      : activeTab === "themed"
+        ? {
+            currentIndex: activeThemedSetIndex,
+            total: extraWritingSets.length,
+            onPrev: () => {
+              const prev = extraWritingSets[activeThemedSetIndex - 1];
+              if (prev) {
+                setSelectedSetId(prev.id);
+                setSelectedThemedChar(prev.characters[0]?.hanzi ?? "");
+              }
+            },
+            onNext: () => {
+              const next = extraWritingSets[activeThemedSetIndex + 1];
+              if (next) {
+                setSelectedSetId(next.id);
+                setSelectedThemedChar(next.characters[0]?.hanzi ?? "");
+              }
+            },
+            onJump: (idx: number) => {
+              const target = extraWritingSets[idx];
+              if (target) {
+                setSelectedSetId(target.id);
+                setSelectedThemedChar(target.characters[0]?.hanzi ?? "");
+              }
+            },
+            itemLabel: "Bộ",
+            nextLabel: "Bộ tiếp",
+          }
+      : activeTab === "two-sentences"
+        ? {
+            currentIndex: currentVocabIndex,
+            total: levelVocabEntries.length,
+            onPrev: () => {
+              const prev = levelVocabEntries[currentVocabIndex - 1];
+              if (prev) setSelectedVocabWord(prev.hanzi);
+            },
+            onNext: () => {
+              const next = levelVocabEntries[currentVocabIndex + 1];
+              if (next) setSelectedVocabWord(next.hanzi);
+            },
+            onJump: (idx: number) => {
+              const target = levelVocabEntries[idx];
+              if (target) setSelectedVocabWord(target.hanzi);
+            },
+            itemLabel: "Từ",
+            nextLabel: "Từ tiếp",
+          }
+        : activeTab === "sentence-order"
+          ? {
+              currentIndex: safeSoIndex,
+              total: filteredOrderExercises.length,
+              onPrev: () => {
+                setSoIndex((i) => Math.max(0, i - 1));
+                handleResetOrder();
+              },
+              onNext: () => {
+                setSoIndex((i) =>
+                  Math.min(filteredOrderExercises.length - 1, i + 1)
+                );
+                handleResetOrder();
+              },
+              onJump: (idx: number) => {
+                setSoIndex(idx);
+                handleResetOrder();
+              },
+              itemLabel: "Câu",
+            }
+          : {
+              currentIndex: currentPromptIndex,
+              total: filteredPrompts.length,
+              onPrev: () => {
+                const prev = filteredPrompts[currentPromptIndex - 1];
+                if (prev) handleSelectPrompt(prev.id);
+              },
+              onNext: () => {
+                const next = filteredPrompts[currentPromptIndex + 1];
+                if (next) handleSelectPrompt(next.id);
+              },
+              onJump: (idx: number) => {
+                const target = filteredPrompts[idx];
+                if (target) handleSelectPrompt(target.id);
+              },
+              itemLabel: "Đề",
+              nextLabel: "Đề tiếp",
+            };
+
+  return (
+    <SkillFocusLayout
+      backHref="/roadmap"
+      hskLevel={currentHskLevel}
+      onHskLevelChange={(lvl) => {
+        if (activeTab === "stroke") {
+          const nextLvl = lvl as "ALL" | HSKLevel | "HSK7-9";
+          setStrokeLevel(nextLvl);
+          const first =
+            nextLvl === "ALL"
+              ? strokeBankList[0]
+              : nextLvl === "HSK7-9"
+                ? strokeBankList.find((c) =>
+                    ["HSK7", "HSK8", "HSK9"].includes(c.level)
+                  )
+                : strokeBankList.find((c) => c.level === nextLvl);
+          if (first) setSelectedCharHanzi(first.hanzi);
+        } else if (activeTab === "themed") {
+          setThemedLevel(lvl as "ALL" | HSKLevel | "HSK7-9");
+          setSelectedSetId("");
+          setSelectedThemedChar("");
+        } else if (activeTab === "two-sentences") {
+          const nextLvl = (lvl === "ALL" ? "HSK1" : lvl) as HSKLevel | "HSK7-9";
+          setTwoSentLevel(nextLvl);
+          const first = allDictEntries.find((e) => e.level === nextLvl);
+          if (first) setSelectedVocabWord(first.hanzi);
+        } else if (activeTab === "sentence-order") {
+          setSoLevel(lvl as "ALL" | HSKLevel | "HSK7-9");
+          setSoIndex(0);
+          handleResetOrder();
+        } else {
+          setEssayLevel(lvl as "ALL" | HSKLevel | "HSK7-9");
+        }
+      }}
+      allowAllLevel={activeTab !== "two-sentences"}
+      currentTitle={currentTitle}
+      modeSlot={
+        <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
           {(
             [
-              {
-                id: "stroke" as const,
-                label: "1. Vẽ chữ Hán (米字格)",
-                icon: PenTool,
-              },
-              {
-                id: "two-sentences" as const,
-                label: "2. Đặt 2 câu từ mới",
-                icon: Sparkles,
-              },
-              {
-                id: "sentence-order" as const,
-                label: "3. Sắp xếp câu",
-                icon: Puzzle,
-              },
-              {
-                id: "essay" as const,
-                label: "4. Viết đoạn & Email",
-                icon: FileText,
-              },
+              { id: "stroke" as const, label: "米字格", icon: PenTool },
+              { id: "themed" as const, label: "Bộ chủ đề", icon: Layers },
+              { id: "two-sentences" as const, label: "Đặt 2 câu", icon: Sparkles },
+              { id: "sentence-order" as const, label: "Sắp xếp", icon: Puzzle },
+              { id: "essay" as const, label: "Viết đoạn", icon: FileText },
             ]
           ).map((tab) => {
             const Icon = tab.icon;
@@ -529,435 +823,453 @@ export default function WritingPage() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors ${
+                className={`inline-flex cursor-pointer items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold transition-colors sm:px-2.5 sm:text-xs ${
                   active
-                    ? "bg-brand-soft text-brand-active ring-1 ring-brand"
-                    : "text-[#737373] hover:bg-[#FAF9F7] hover:text-[#262626]"
+                    ? "bg-white text-brand-active shadow-2xs ring-1 ring-brand/60"
+                    : "text-[#737373] hover:text-[#262626]"
                 }`}
               >
                 <Icon className="h-3.5 w-3.5" />
-                <span>{tab.label}</span>
+                <span className="hidden sm:inline">{tab.label}</span>
               </button>
             );
           })}
         </div>
-      </div>
-
-      {/* ========================================================= */}
-      {/* TAB 1: STROKE ORDER CANVAS (VẼ CHỮ HÁN CHẤM NÉT - 米字格) */}
-      {/* ========================================================= */}
+      }
+      settingsContent={
+        activeTab === "stroke" || activeTab === "sentence-order" ? (
+          <div className="space-y-1.5">
+            <span className="block text-xs font-semibold text-[#4A4540]">
+              Độ khó con
+            </span>
+            <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
+              {(
+                [
+                  { id: "all" as const, label: "Tất cả" },
+                  { id: "basic" as const, label: "Cơ bản" },
+                  { id: "advanced" as const, label: "Nâng cao" },
+                ]
+              ).map((sub) => {
+                const current =
+                  activeTab === "stroke" ? strokeSubFilter : soSubFilter;
+                return (
+                  <button
+                    key={sub.id}
+                    type="button"
+                    onClick={() => {
+                      if (activeTab === "stroke") {
+                        setStrokeSubFilter(sub.id);
+                      } else {
+                        setSoSubFilter(sub.id);
+                        setSoIndex(0);
+                        handleResetOrder();
+                      }
+                    }}
+                    className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+                      current === sub.id
+                        ? "bg-white text-brand-active ring-1 ring-brand"
+                        : "text-[#737373] hover:text-[#262626]"
+                    }`}
+                  >
+                    {sub.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : undefined
+      }
+      sidebarTitle={sidebarTitle}
+      sidebarSummary={sidebarSummary}
+      sidebarTopSlot={
+        activeTab === "stroke" ? (
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              value={customHanziInput}
+              onChange={(e) => setCustomHanziInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && customHanziInput.trim()) {
+                  setSelectedCharHanzi(customHanziInput.trim());
+                }
+              }}
+              placeholder="Nhập chữ (VD: 永, 爱)..."
+              className="h-8 min-w-0 flex-1 rounded-lg border border-[#E5E5E0] bg-[#FAF9F7] px-2.5 text-xs text-[#262626] placeholder:text-[#737373] focus:border-brand focus:bg-white focus:outline-none"
+            />
+            <button
+              type="button"
+              disabled={!customHanziInput.trim()}
+              onClick={() => {
+                const cleaned = customHanziInput.trim();
+                if (cleaned) setSelectedCharHanzi(cleaned);
+              }}
+              className="h-8 shrink-0 cursor-pointer rounded-lg bg-brand px-2.5 text-xs font-semibold text-white hover:bg-brand-hover disabled:opacity-45"
+            >
+              Luyện
+            </button>
+          </div>
+        ) : undefined
+      }
+      lessons={sidebarLessons}
+      activeLessonId={activeLessonId}
+      onSelectLesson={(id) => {
+        if (activeTab === "stroke") {
+          setSelectedCharHanzi(id);
+        } else if (activeTab === "themed") {
+          setSelectedSetId(id);
+          const found = extraWritingSets.find((s) => s.id === id);
+          setSelectedThemedChar(found?.characters[0]?.hanzi ?? "");
+        } else if (activeTab === "two-sentences") {
+          setSelectedVocabWord(id);
+        } else if (activeTab === "sentence-order") {
+          const idx = filteredOrderExercises.findIndex((ex) => ex.id === id);
+          if (idx !== -1) {
+            setSoIndex(idx);
+            handleResetOrder();
+          }
+        } else {
+          handleSelectPrompt(id);
+        }
+      }}
+      pagination={pagination}
+    >
+      {/* TAB 1: 100% FOCUS ON 米字格 HANZI STROKE CANVAS */}
       {activeTab === "stroke" && (
-        <div className="space-y-4">
-          {/* Unified Single-Row Filter + Custom Hanzi Input */}
-          <UnifiedFilterBar
-            searchQuery={customHanziInput}
-            onSearchChange={setCustomHanziInput}
-            searchPlaceholder="Nhập chữ Hán muốn luyện (VD: 永, 爱, 贸易)..."
-            hskLevel={strokeLevel}
-            onHskLevelChange={(lvl) => {
-              const nextLvl = lvl as "ALL" | HSKLevel | "HSK7-9";
-              setStrokeLevel(nextLvl);
-              const first =
-                nextLvl === "ALL"
-                  ? strokeBankList[0]
-                  : nextLvl === "HSK7-9"
-                    ? strokeBankList.find((c) =>
-                        ["HSK7", "HSK8", "HSK9"].includes(c.level)
-                      )
-                    : strokeBankList.find((c) => c.level === nextLvl);
-              if (first) setSelectedCharHanzi(first.hanzi);
-            }}
-            allowAllLevel
-            difficulty={strokeSubFilter}
-            onDifficultyChange={(val) =>
-              setStrokeSubFilter(val as "all" | SubDifficulty)
-            }
-            rightSlot={
+        <HanziStrokeCanvas
+          hanzi={selectedCharHanzi}
+          pinyin={
+            matchedStrokeItem?.pinyin ??
+            (selectedCharHanzi === "永" ? "yǒng" : undefined)
+          }
+          meaningVi={
+            matchedStrokeItem?.meaningVi ??
+            (selectedCharHanzi === "永" ? "vĩnh cửu, mãi mãi" : undefined)
+          }
+        />
+      )}
+
+      {/* TAB 1B: THEMED WRITING SETS (10-15 HANZI + PROMPT) */}
+      {activeTab === "themed" &&
+        (activeThemedSet ? (
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-[#E5E5E0] bg-[#FAF9F7] p-4">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[#6B655E]">
+                  <span className="rounded-md bg-brand-soft px-2 py-0.5 text-brand-active">
+                    {activeThemedSet.level}
+                  </span>
+                  <span>{activeThemedSet.topic}</span>
+                  <span>·</span>
+                  <span>{activeThemedSet.titleZh}</span>
+                </div>
+                <h2 className="text-lg font-bold text-[#262626]">
+                  {activeThemedSet.titleVi}
+                </h2>
+                <p className="text-xs text-[#57534E]">
+                  Chọn một chữ Hán trong bộ ({activeThemedSet.characters.length} chữ) để luyện thứ tự nét trên khung 米字格, sau đó chuyển sang viết đoạn ứng dụng.
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => {
-                  const cleaned = customHanziInput.trim();
-                  if (cleaned) setSelectedCharHanzi(cleaned);
+                  setEssayLevel(activeThemedSet.level);
+                  handleSelectPrompt(activeThemedSet.prompt.id);
+                  setActiveTab("essay");
                 }}
-                disabled={!customHanziInput.trim()}
-                className="h-8 shrink-0 cursor-pointer rounded-xl bg-brand px-3 text-xs font-semibold text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-45"
+                className="shrink-0 cursor-pointer rounded-xl bg-brand px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-hover"
               >
-                Luyện
+                Viết đoạn theo bộ này →
               </button>
-            }
-          />
-
-          {/* Compact Character Bank Strip */}
-          <div className="rounded-2xl border border-[#E5E5E0] bg-white p-3">
-            <div className="flex flex-wrap gap-1.5">
-              {filteredStrokeBank.map((item) => {
-                const active = selectedCharHanzi === item.hanzi;
-                return (
-                  <button
-                    key={item.hanzi}
-                    type="button"
-                    onClick={() => setSelectedCharHanzi(item.hanzi)}
-                    className={`flex cursor-pointer flex-col items-center rounded-xl border px-3 py-1.5 transition-all ${
-                      active
-                        ? "border-brand bg-brand-soft text-brand-active shadow-xs"
-                        : "border-[#E5E5E0] bg-[#FAF9F7] text-[#262626] hover:border-brand hover:bg-white"
-                    }`}
-                  >
-                    <span className="text-lg font-bold">{item.hanzi}</span>
-                    <span
-                      className={`text-[10px] ${
-                        active ? "text-brand-active/80" : "text-[#737373]"
-                      }`}
-                    >
-                      {item.pinyin}
-                    </span>
-                  </button>
-                );
-              })}
             </div>
-          </div>
 
-          {/* Interactive Stroke Canvas Component */}
-          <HanziStrokeCanvas
-            hanzi={selectedCharHanzi}
-            pinyin={matchedStrokeItem?.pinyin ?? (selectedCharHanzi === "永" ? "yǒng" : undefined)}
-            meaningVi={
-              matchedStrokeItem?.meaningVi ??
-              (selectedCharHanzi === "永" ? "vĩnh cửu, mãi mãi" : undefined)
-            }
-          />
-        </div>
-      )}
-
-      {/* ========================================================= */}
-      {/* TAB 2: ĐẶT 2 CÂU HOÀN CHỈNH VỚI TỪ VỰNG MỚI */}
-      {/* ========================================================= */}
-      {activeTab === "two-sentences" && (
-        <div className="space-y-4">
-          <UnifiedFilterBar
-            hskLevel={twoSentLevel}
-            onHskLevelChange={(lvl) => {
-              const nextLvl = lvl as HSKLevel | "HSK7-9";
-              setTwoSentLevel(nextLvl);
-              const first = allDictEntries.find((e) => e.level === nextLvl);
-              if (first) setSelectedVocabWord(first.hanzi);
-            }}
-            allowAllLevel={false}
-            rightSlot={
-              <span className="whitespace-nowrap text-[11px] font-medium text-[#737373]">
-                {levelVocabEntries.length} từ vựng
-              </span>
-            }
-          />
-
-          <div className="rounded-2xl border border-[#E5E5E0] bg-white p-3">
-            <div className="flex flex-wrap gap-2">
-              {levelVocabEntries.slice(0, 24).map((entry) => {
-                const active = activeVocabEntry.hanzi === entry.hanzi;
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+              {activeThemedSet.characters.map((ch) => {
+                const isSelected = activeThemedCharObj?.hanzi === ch.hanzi;
                 return (
                   <button
-                    key={entry.hanzi}
+                    key={ch.hanzi}
                     type="button"
-                    onClick={() => setSelectedVocabWord(entry.hanzi)}
-                    className={`cursor-pointer rounded-xl border px-3 py-1.5 text-left transition-colors ${
-                      active
-                        ? "border-brand bg-brand-soft text-brand-active"
-                        : "border-[#E5E5E0] bg-[#FAF9F7] text-[#262626] hover:border-brand"
+                    onClick={() => setSelectedThemedChar(ch.hanzi)}
+                    className={`cursor-pointer rounded-xl border p-2.5 text-center transition-colors ${
+                      isSelected
+                        ? "border-brand bg-brand-soft/40 ring-1 ring-brand"
+                        : "border-[#E5E5E0] bg-white hover:border-brand/60"
                     }`}
                   >
-                    <div className="text-sm font-bold">{entry.hanzi}</div>
-                    <div
-                      className={`text-[10px] ${
-                        active ? "text-[#4A4540]" : "text-[#737373]"
-                      }`}
-                    >
-                      {entry.pinyin} · {entry.meaningVi.split(";")[0]}
+                    <div className="text-2xl font-bold text-[#262626]">
+                      {ch.hanzi}
+                    </div>
+                    <div className="mt-0.5 font-mono text-[11px] font-medium text-[#6B655E]">
+                      {ch.pinyin}
+                    </div>
+                    <div className="truncate text-[10px] text-[#737373]">
+                      {ch.meaningVi}
+                    </div>
+                    <div className="mt-0.5 text-[10px] text-[#A8A29E]">
+                      {ch.strokeCount} nét
                     </div>
                   </button>
                 );
               })}
             </div>
-          </div>
 
-          <TwoSentenceBuilder
-            targetWord={activeVocabEntry.hanzi}
-            pinyin={activeVocabEntry.pinyin}
-            meaningVi={activeVocabEntry.meaningVi}
-          />
-        </div>
+            {activeThemedCharObj && (
+              <HanziStrokeCanvas
+                hanzi={activeThemedCharObj.hanzi}
+                pinyin={activeThemedCharObj.pinyin}
+                meaningVi={`${activeThemedCharObj.meaningVi} · Bộ: ${activeThemedCharObj.radical} (${activeThemedCharObj.strokeCount} nét)`}
+              />
+            )}
+
+            <div className="space-y-2 rounded-2xl border border-[#E5E5E0] bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#6B655E]">
+                  Đề viết ứng dụng đi kèm ({activeThemedSet.prompt.examType})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEssayLevel(activeThemedSet.level);
+                    handleSelectPrompt(activeThemedSet.prompt.id);
+                    setActiveTab("essay");
+                  }}
+                  className="cursor-pointer text-xs font-semibold text-brand-active hover:underline"
+                >
+                  Mở khung viết & chấm ngữ pháp →
+                </button>
+              </div>
+              <p className="text-sm font-semibold text-[#262626]">
+                {activeThemedSet.prompt.title}
+              </p>
+              <p className="text-xs leading-relaxed text-[#57534E]">
+                {activeThemedSet.prompt.scenarioVi}
+              </p>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {activeThemedSet.prompt.keywords.map((kw) => (
+                  <span
+                    key={kw}
+                    className="rounded-lg border border-[#E5E5E0] bg-[#FAF9F7] px-2.5 py-1 text-xs font-semibold text-[#262626]"
+                  >
+                    {kw}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="py-10 text-center text-sm text-[#737373]">
+            Đang tải bộ chữ luyện viết theo chủ đề...
+          </p>
+        ))}
+
+      {/* TAB 2: TWO-SENTENCE BUILDER */}
+      {activeTab === "two-sentences" && (
+        <TwoSentenceBuilder
+          targetWord={activeVocabEntry.hanzi}
+          pinyin={activeVocabEntry.pinyin}
+          meaningVi={activeVocabEntry.meaningVi}
+        />
       )}
 
-      {/* ========================================================= */}
-      {/* TAB 3: SẮP XẾP TỪ THÀNH CÂU (SENTENCE_ORDER_EXERCISES) */}
-      {/* ========================================================= */}
-      {activeTab === "sentence-order" && (
-        <div className="space-y-4">
-          <UnifiedFilterBar
-            hskLevel={soLevel}
-            onHskLevelChange={(lvl) => {
-              setSoLevel(lvl as "ALL" | HSKLevel | "HSK7-9");
-              setSoIndex(0);
-              handleResetOrder();
-            }}
-            allowAllLevel
-            difficulty={soSubFilter}
-            onDifficultyChange={(val) => {
-              setSoSubFilter(val as "all" | SubDifficulty);
-              setSoIndex(0);
-              handleResetOrder();
-            }}
-            rightSlot={
-              <span className="whitespace-nowrap text-[11px] font-medium text-[#737373]">
-                {filteredOrderExercises.length} câu
+      {/* TAB 3: SENTENCE ORDERING */}
+      {activeTab === "sentence-order" &&
+        (currentOrderEx ? (
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#737373]">
+              <span className="font-semibold text-[#6B655E]">
+                {currentOrderEx.level} ·{" "}
+                {currentOrderEx.subDifficulty === "advanced"
+                  ? "Nâng cao"
+                  : "Cơ bản"}{" "}
+                · {currentOrderEx.grammarTopic}
               </span>
-            }
-          />
+            </div>
 
-          {currentOrderEx && (
-            <div className="space-y-6 rounded-2xl border border-[#E5E5E0] bg-white p-6 sm:p-8">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#737373]">
-                <span>
-                  Câu {soIndex + 1} / {filteredOrderExercises.length}
-                </span>
-                <span className="font-semibold text-[#6B655E]">
-                  {currentOrderEx.level} ·{" "}
-                  {currentOrderEx.subDifficulty === "advanced"
-                    ? "Nâng cao"
-                    : "Cơ bản"}{" "}
-                  · {currentOrderEx.grammarTopic}
-                </span>
-              </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wider text-[#737373]">
+                Sắp xếp thẻ chữ Hán thành câu đúng trật tự ngữ pháp
+              </p>
+              <p className="mt-1.5 text-lg font-bold text-[#262626]">
+                &ldquo;{currentOrderEx.promptVi}&rdquo;
+              </p>
+            </div>
 
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wider text-[#737373]">
-                  Sắp xếp các thẻ từ chữ Hán thành câu đúng trật tự ngữ pháp tiếng Trung
+            <div className="min-h-20 rounded-xl border-2 border-dashed border-[#E5E5E0] bg-[#FAF9F7] p-4">
+              {builtOrderTokens.length === 0 ? (
+                <p className="py-2 text-center text-sm text-[#737373]">
+                  Nhấn vào các thẻ chữ Hán bên dưới để ghép câu...
                 </p>
-                <p className="mt-2 text-lg font-semibold text-[#262626]">
-                  &ldquo;{currentOrderEx.promptVi}&rdquo;
-                </p>
-              </div>
-
-              {/* Drop Zone */}
-              <div className="min-h-22 rounded-xl border-2 border-dashed border-[#E5E5E0] bg-[#F2F2F0]/50 p-4">
-                {builtOrderTokens.length === 0 ? (
-                  <p className="py-3 text-center text-sm text-[#737373]">
-                    Nhấn vào các thẻ chữ Hán bên dưới để ghép câu...
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {builtOrderTokens.map((token, posIdx) => (
-                      <button
-                        key={`${token}-${posIdx}`}
-                        type="button"
-                        disabled={soChecked}
-                        onClick={() => {
-                          if (soChecked) return;
-                          setSelectedTileIndices((prev) =>
-                            prev.filter((_, i) => i !== posIdx)
-                          );
-                        }}
-                        className="cursor-pointer rounded-xl bg-[#292524] px-3.5 py-2 text-base font-semibold text-white transition-colors hover:bg-[#4A4540] disabled:cursor-default"
-                      >
-                        {token}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Available Word Tiles */}
-              <div className="flex flex-wrap gap-2">
-                {currentOrderEx.scrambledTokens.map((token, idx) => {
-                  const used = selectedTileIndices.includes(idx);
-                  return (
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {builtOrderTokens.map((token, posIdx) => (
                     <button
-                      key={`${token}-${idx}`}
+                      key={`${token}-${posIdx}`}
                       type="button"
-                      disabled={used || soChecked}
+                      disabled={soChecked}
                       onClick={() => {
-                        if (soChecked || used) return;
-                        setSelectedTileIndices((prev) => [...prev, idx]);
+                        if (soChecked) return;
+                        setSelectedTileIndices((prev) =>
+                          prev.filter((_, i) => i !== posIdx)
+                        );
                       }}
-                      className={`cursor-pointer rounded-xl border px-3.5 py-2 text-base font-semibold transition-colors ${
-                        used
-                          ? "cursor-default border-[#E5E5E0] bg-[#F2F2F0] text-[#D4D4CE]"
-                          : "border-[#E5E5E0] bg-white text-[#262626] hover:border-[#6B655E] hover:bg-[#F2F2F0]/50"
-                      }`}
+                      className="cursor-pointer rounded-xl bg-[#292524] px-3.5 py-2 text-base font-semibold text-white transition-colors hover:bg-[#4A4540] disabled:cursor-default"
                     >
                       {token}
                     </button>
-                  );
-                })}
-              </div>
-
-              {/* Feedback */}
-              {soChecked && (
-                <div
-                  className={`rounded-xl border p-4 ${
-                    soCorrect
-                      ? "border-[#15803D]/30 bg-[#F0FDF4]"
-                      : "border-[#B91C1C]/30 bg-[#FEF2F2]"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2.5">
-                    <div className="flex items-start gap-2.5">
-                      {soCorrect ? (
-                        <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-[#15803D]" />
-                      ) : (
-                        <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-[#B91C1C]" />
-                      )}
-                      <div className="space-y-1">
-                        <p
-                          className={`text-sm font-semibold ${
-                            soCorrect ? "text-[#15803D]" : "text-[#B91C1C]"
-                          }`}
-                        >
-                          {soCorrect
-                            ? "Chính xác! +15 XP"
-                            : "Chưa đúng trật tự từ tiếng Trung. Đáp án chuẩn:"}
-                        </p>
-                        <div className="text-base font-bold text-[#262626]">
-                          <InteractiveChineseText
-                            text={currentOrderEx.correctAnswer}
-                            pinyin={currentOrderEx.pinyin}
-                          />
-                        </div>
-                        {currentOrderEx.pinyin && (
-                          <p className="font-mono text-xs text-[#6B655E]">
-                            {currentOrderEx.pinyin}
-                          </p>
-                        )}
-                        <p className="text-xs leading-relaxed text-[#57534E]">
-                          {currentOrderEx.explanationVi}
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        speakChinese(currentOrderEx.correctAnswer, 0.95)
-                      }
-                      className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-xl border border-[#E5E5E0] bg-white px-3 py-1.5 text-xs font-semibold text-[#262626] hover:border-[#6B655E]"
-                    >
-                      <Volume2 className="h-3.5 w-3.5 text-[#6B655E]" />
-                      Nghe câu
-                    </button>
-                  </div>
+                  ))}
                 </div>
               )}
-
-              {/* Actions */}
-              <div className="flex items-center justify-between pt-2">
-                <button
-                  type="button"
-                  onClick={handleResetOrder}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-[#E5E5E0] bg-white px-3.5 py-2 text-xs font-medium text-[#262626] transition-colors hover:bg-[#F2F2F0]"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  Xếp lại
-                </button>
-
-                {!soChecked ? (
-                  <button
-                    type="button"
-                    onClick={handleCheckOrder}
-                    disabled={
-                      selectedTileIndices.length !==
-                      currentOrderEx.scrambledTokens.length
-                    }
-                    className="cursor-pointer rounded-xl bg-[#6B655E] px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#4A4540] disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Kiểm tra trật tự câu
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSoIndex(
-                        (prev) => (prev + 1) % filteredOrderExercises.length
-                      );
-                      handleResetOrder();
-                    }}
-                    className="inline-flex cursor-pointer items-center gap-1 rounded-xl bg-[#292524] px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#4A4540]"
-                  >
-                    Câu tiếp theo
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
             </div>
-          )}
-        </div>
-      )}
 
-      {/* ========================================================= */}
-      {/* TAB 4: VIẾT ĐOẠN VĂN / EMAIL THƯƠNG MẠI / LUẬN HSK */}
-      {/* ========================================================= */}
-      {activeTab === "essay" && activePrompt && (
-        <div className="space-y-6">
-          {/* Prompt Selector */}
-          <div className="flex flex-wrap gap-2">
-            {normalizedPrompts.map((p) => {
-              const isActive = p.id === activePrompt.id;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => handleSelectPrompt(p.id)}
-                  className={`cursor-pointer rounded-xl border px-3.5 py-2 text-left text-xs font-semibold transition-colors ${
-                    isActive
-                      ? "border-[#292524] bg-[#292524] text-white"
-                      : "border-[#E5E5E0] bg-white text-[#262626] hover:border-[#6B655E]"
-                  }`}
-                >
-                  {p.level} · {p.title}
-                </button>
-              );
-            })}
+            <div className="flex flex-wrap gap-2">
+              {currentOrderEx.scrambledTokens.map((token, idx) => {
+                const used = selectedTileIndices.includes(idx);
+                return (
+                  <button
+                    key={`${token}-${idx}`}
+                    type="button"
+                    disabled={used || soChecked}
+                    onClick={() => {
+                      if (soChecked || used) return;
+                      setSelectedTileIndices((prev) => [...prev, idx]);
+                    }}
+                    className={`cursor-pointer rounded-xl border px-3.5 py-2 text-base font-semibold transition-colors ${
+                      used
+                        ? "cursor-default border-[#E5E5E0] bg-[#F2F2F0] text-[#D4D4CE]"
+                        : "border-[#E5E5E0] bg-white text-[#262626] hover:border-brand hover:bg-brand-soft/40"
+                    }`}
+                  >
+                    {token}
+                  </button>
+                );
+              })}
+            </div>
+
+            {soChecked && (
+              <div
+                className={`rounded-xl border p-4 ${
+                  soCorrect
+                    ? "border-[#BBF7D0] bg-[#F0FDF4]"
+                    : "border-[#FECACA] bg-[#FEF2F2]"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex items-start gap-2.5">
+                    {soCorrect ? (
+                      <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-[#15803D]" />
+                    ) : (
+                      <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-[#B91C1C]" />
+                    )}
+                    <div className="space-y-1">
+                      <p
+                        className={`text-sm font-semibold ${
+                          soCorrect ? "text-[#15803D]" : "text-[#B91C1C]"
+                        }`}
+                      >
+                        {soCorrect
+                          ? "Chính xác! +15 XP"
+                          : "Chưa đúng trật tự từ. Đáp án chuẩn:"}
+                      </p>
+                      <div className="text-base font-bold text-[#262626]">
+                        <InteractiveChineseText
+                          text={currentOrderEx.correctAnswer}
+                          pinyin={currentOrderEx.pinyin}
+                        />
+                      </div>
+                      {currentOrderEx.pinyin && (
+                        <p className="font-mono text-xs text-[#6B655E]">
+                          {currentOrderEx.pinyin}
+                        </p>
+                      )}
+                      <p className="text-xs leading-relaxed text-[#57534E]">
+                        {currentOrderEx.explanationVi}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      speakChinese(currentOrderEx.correctAnswer, 0.95)
+                    }
+                    className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-xl border border-[#E5E5E0] bg-white px-3 py-1.5 text-xs font-semibold text-[#262626] hover:border-brand"
+                  >
+                    <Volume2 className="h-3.5 w-3.5 text-brand" />
+                    Nghe câu
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-1">
+              <button
+                type="button"
+                onClick={handleResetOrder}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-[#E5E5E0] bg-white px-3.5 py-2 text-xs font-medium text-[#262626] hover:bg-[#FAF9F7]"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Xếp lại
+              </button>
+              <button
+                type="button"
+                onClick={handleCheckOrder}
+                disabled={
+                  soChecked ||
+                  selectedTileIndices.length !==
+                    currentOrderEx.scrambledTokens.length
+                }
+                className="cursor-pointer rounded-xl bg-[#292524] px-5 py-2 text-xs font-semibold text-white hover:bg-[#4A4540] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Kiểm tra trật tự câu
+              </button>
+            </div>
           </div>
+        ) : (
+          <p className="py-10 text-center text-sm text-[#737373]">
+            Chưa có bài sắp xếp câu cho cấp độ này.
+          </p>
+        ))}
 
-          <div className="space-y-6 rounded-2xl border border-[#E5E5E0] bg-white p-6 sm:p-8">
-            <div className="border-b border-[#E5E5E0] pb-5">
+      {/* TAB 4: ESSAY / BUSINESS EMAIL */}
+      {activeTab === "essay" &&
+        (activePrompt ? (
+          <div className="space-y-5">
+            <div className="border-b border-[#E5E5E0] pb-4">
               <p className="text-xs font-semibold text-[#6B655E]">
                 {activePrompt.level} · {activePrompt.examType}
               </p>
-              <h2 className="mt-1 text-xl font-bold text-[#262626]">
+              <h2 className="mt-1 text-lg font-bold text-[#262626]">
                 {activePrompt.title}
               </h2>
-              <p className="mt-1.5 text-sm leading-relaxed text-[#737373]">
+              <p className="mt-1 text-xs leading-relaxed text-[#737373] sm:text-sm">
                 {activePrompt.scenarioVi}
               </p>
             </div>
 
-            {/* Keyword Hints */}
             <div>
               <button
                 type="button"
                 onClick={() => setShowHints((prev) => !prev)}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#E5E5E0] bg-[#F2F2F0]/60 px-3 py-1.5 text-xs font-semibold text-[#262626] transition-colors hover:bg-[#F2F2F0]"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#E5E5E0] bg-[#FAF9F7] px-3 py-1.5 text-xs font-semibold text-[#262626] hover:border-brand"
               >
-                <Lightbulb className="h-3.5 w-3.5 text-[#6B655E]" />
+                <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
                 {showHints
                   ? "Ẩn từ khóa chữ Hán bắt buộc"
                   : "Hiện từ khóa chữ Hán bắt buộc"}
               </button>
 
               {showHints && activePrompt.keywords.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {activePrompt.keywords.map((kw) => {
                     const used = essayText.includes(kw);
                     return (
                       <button
                         key={kw}
                         type="button"
-                        onClick={() =>
-                          setEssayText((prev) => `${prev}${kw}`)
-                        }
+                        onClick={() => setEssayText((prev) => `${prev}${kw}`)}
                         className={`cursor-pointer rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
                           used
                             ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D]"
-                            : "border-[#E5E5E0] bg-white text-[#262626] hover:border-[#6B655E]"
+                            : "border-[#E5E5E0] bg-white text-[#262626] hover:border-brand"
                         }`}
                       >
                         {used ? "✓ " : "+ "}
@@ -969,29 +1281,26 @@ export default function WritingPage() {
               )}
             </div>
 
-            {/* Writing Textarea + Grammar Checker */}
             <div>
               <textarea
-                rows={8}
+                rows={7}
                 value={essayText}
                 onChange={(e) => {
                   setEssayText(e.target.value);
                   setSavedBanner(false);
                 }}
-                placeholder="Nhập đoạn văn / email thương mại bằng chữ Hán của bạn tại đây (ví dụ: 您好！关于我们公司的订单，希望能与贵公司长期合作。)"
-                className="w-full rounded-xl border border-[#E5E5E0] bg-[#F2F2F0]/30 p-5 text-base leading-relaxed text-[#262626] placeholder:text-[#737373]/70 focus:border-[#6B655E] focus:bg-white focus:outline-none"
+                placeholder="Nhập đoạn văn / email bằng chữ Hán của bạn tại đây..."
+                className="w-full rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-4 text-base leading-relaxed text-[#262626] placeholder:text-[#737373]/70 focus:border-brand focus:bg-white focus:outline-none"
               />
-              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <button
                   type="button"
                   onClick={handleRunGrammarCheck}
                   disabled={!essayText.trim()}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[#292524] px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#4A4540] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[#292524] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#4A4540] disabled:opacity-40"
                 >
                   <Sparkles className="h-3.5 w-3.5" />
-                  <span>
-                    Kiểm tra lỗi ngữ pháp tiếng Trung (是...很..., 不有, 二+lượng từ, dấu 。)
-                  </span>
+                  Kiểm tra lỗi ngữ pháp
                 </button>
                 <span
                   className={
@@ -1001,126 +1310,70 @@ export default function WritingPage() {
                   }
                 >
                   {currentHanziCount} / {activePrompt.targetChars} chữ Hán (tối thiểu{" "}
-                  {activePrompt.minChars} chữ)
+                  {activePrompt.minChars})
                 </span>
               </div>
 
-              {/* Grammar Feedback Panel */}
               {grammarIssues !== null && (
-                <div className="mt-4 space-y-2.5 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-[#262626]">
-                        Bộ Kiểm Tra Ngữ Pháp Tiếng Trung (Hanzi Grammarly)
-                      </span>
-                      {grammarXpAwarded[activePrompt.id] && (
-                        <span className="rounded-full border border-[#BBF7D0] bg-[#F0FDF4] px-2 py-0.5 text-[10px] font-semibold text-[#15803D]">
-                          +10 XP
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-xs font-medium text-[#737373]">
-                      {grammarIssues.length === 0
-                        ? "Không phát hiện lỗi ngữ pháp"
-                        : `${grammarIssues.length} điểm cần lưu ý`}
-                    </span>
-                  </div>
-
+                <div className="mt-3 space-y-2 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-3.5">
                   {grammarIssues.length === 0 ? (
-                    <div className="flex items-center gap-2 rounded-xl border border-[#BBF7D0] bg-[#F0FDF4] px-3.5 py-2.5 text-xs font-medium text-[#15803D]">
+                    <div className="flex items-center gap-2 rounded-lg border border-[#BBF7D0] bg-[#F0FDF4] px-3 py-2 text-xs font-medium text-[#15803D]">
                       <CheckCircle2 className="h-4 w-4 shrink-0" />
                       <span>
-                        Tuyệt vời! Bài viết đúng chuẩn dấu câu tiếng Trung, đủ từ khóa và không mắc các lỗi ngữ pháp thường gặp.
+                        Tuyệt vời! Không phát hiện lỗi ngữ pháp hay dấu câu.
                       </span>
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {grammarIssues.map((issue) => {
-                        const cardStyle =
-                          issue.severity === "error"
-                            ? "border-[#FECACA] bg-[#FEF2F2]"
-                            : issue.severity === "warning"
-                              ? "border-[#FDE68A] bg-[#FFFBEB]"
-                              : "border-[#E5E5E0] bg-white";
-                        const badgeStyle =
-                          issue.severity === "error"
-                            ? "bg-[#B91C1C]/10 text-[#B91C1C]"
-                            : issue.severity === "warning"
-                              ? "bg-[#B45309]/10 text-[#B45309]"
-                              : "bg-[#F2F2F0] text-[#4A4540]";
-
-                        return (
-                          <div
-                            key={issue.id}
-                            className={`rounded-xl border p-3 text-xs ${cardStyle}`}
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <div className="space-y-1">
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  <AlertTriangle
-                                    className={`h-3.5 w-3.5 shrink-0 ${
-                                      issue.severity === "error"
-                                        ? "text-[#B91C1C]"
-                                        : issue.severity === "warning"
-                                          ? "text-[#B45309]"
-                                          : "text-[#6B655E]"
-                                    }`}
-                                  />
-                                  <span
-                                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${badgeStyle}`}
-                                  >
-                                    {issue.category}
-                                  </span>
-                                  {issue.original && issue.replacement && (
-                                    <span className="font-mono text-[11px]">
-                                      <span className="text-[#B91C1C] line-through">
-                                        {issue.original}
-                                      </span>
-                                      <span className="mx-1 text-[#737373]">
-                                        →
-                                      </span>
-                                      <span className="font-semibold text-[#15803D]">
-                                        {issue.replacement}
-                                      </span>
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="leading-relaxed text-[#262626]">
-                                  {issue.explanationVi}
-                                </p>
-                              </div>
-
-                              {(issue.replacement ||
-                                issue.id === "missing-chinese-punct") && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleApplyFix(issue)}
-                                  className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg bg-[#292524] px-2.5 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-[#4A4540]"
-                                >
-                                  <Wand2 className="h-3 w-3" />
-                                  <span>Áp dụng sửa</span>
-                                </button>
-                              )}
-                            </div>
+                    grammarIssues.map((issue) => (
+                      <div
+                        key={issue.id}
+                        className="flex flex-wrap items-start justify-between gap-2 rounded-xl border border-[#E5E5E0] bg-white p-3 text-xs"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5 font-semibold">
+                            <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                            <span>{issue.category}</span>
+                            {issue.original && issue.replacement && (
+                              <span className="font-mono text-[11px]">
+                                <span className="text-[#B91C1C] line-through">
+                                  {issue.original}
+                                </span>
+                                {" → "}
+                                <span className="text-[#15803D]">
+                                  {issue.replacement}
+                                </span>
+                              </span>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
+                          <p className="text-[#4A4540]">{issue.explanationVi}</p>
+                        </div>
+                        {(issue.replacement ||
+                          issue.id === "missing-chinese-punct") && (
+                          <button
+                            type="button"
+                            onClick={() => handleApplyFix(issue)}
+                            className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-lg bg-[#292524] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#4A4540]"
+                          >
+                            <Wand2 className="h-3 w-3" />
+                            Sửa
+                          </button>
+                        )}
+                      </div>
+                    ))
                   )}
                 </div>
               )}
             </div>
 
-            {/* Self-Check Checklist */}
-            <div className="rounded-xl border border-[#E5E5E0] bg-[#F2F2F0]/40 p-4">
-              <p className="mb-2.5 text-xs font-semibold uppercase tracking-wider text-[#737373]">
-                Checklist tiêu chí chấm bài viết HSK
+            <div className="rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-3.5">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
+                Checklist chấm bài viết
               </p>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {activePrompt.checklistVi.map((item, idx) => (
                   <label
                     key={idx}
-                    className="flex cursor-pointer items-start gap-2.5 text-sm text-[#262626]"
+                    className="flex cursor-pointer items-start gap-2 text-xs text-[#262626]"
                   >
                     <input
                       type="checkbox"
@@ -1131,7 +1384,7 @@ export default function WritingPage() {
                           [idx]: e.target.checked,
                         }))
                       }
-                      className="mt-1 h-4 w-4 rounded border-[#E5E5E0] accent-[#6B655E]"
+                      className="mt-0.5 h-3.5 w-3.5 rounded accent-brand"
                     />
                     <span>{item}</span>
                   </label>
@@ -1140,56 +1393,51 @@ export default function WritingPage() {
             </div>
 
             {savedBanner && (
-              <div className="rounded-xl border border-[#15803D]/30 bg-[#F0FDF4] px-4 py-3 text-xs font-semibold text-[#15803D]">
+              <div className="rounded-xl border border-[#BBF7D0] bg-[#F0FDF4] px-3.5 py-2.5 text-xs font-semibold text-[#15803D]">
                 Đã lưu bài viết hoàn thành vào tiến độ (+45 XP).
               </div>
             )}
 
-            {/* Action Row */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={() => setShowSample((prev) => !prev)}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-[#E5E5E0] bg-white px-4 py-2 text-xs font-semibold text-[#262626] transition-colors hover:bg-[#F2F2F0]"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-[#E5E5E0] bg-white px-3.5 py-2 text-xs font-semibold text-[#262626] hover:border-brand"
               >
                 {showSample ? (
                   <>
-                    <EyeOff className="h-3.5 w-3.5" />
-                    Ẩn bài viết mẫu
+                    <EyeOff className="h-3.5 w-3.5" /> Ẩn bài mẫu
                   </>
                 ) : (
                   <>
-                    <Eye className="h-3.5 w-3.5" />
-                    Xem bài viết mẫu (范文)
+                    <Eye className="h-3.5 w-3.5" /> Xem bài mẫu
                   </>
                 )}
               </button>
-
               <button
                 type="button"
                 onClick={handleCompleteEssay}
                 disabled={currentHanziCount < activePrompt.minChars}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-[#6B655E] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#4A4540] disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-xs font-semibold text-white hover:bg-brand-hover disabled:opacity-40"
               >
                 <CheckCircle2 className="h-4 w-4" />
                 Hoàn thành bài viết
               </button>
             </div>
 
-            {/* Sample Essay */}
             {showSample && (
-              <div className="space-y-3 rounded-xl border border-[#E5E5E0] bg-[#F2F2F0]/50 p-5">
+              <div className="space-y-2.5 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-4">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-[#737373]">
-                    Bài viết mẫu chuẩn HSK (参考范文)
-                  </p>
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
+                    Bài viết mẫu chuẩn HSK
+                  </span>
                   <button
                     type="button"
                     onClick={() => speakChinese(activePrompt.sampleZh, 0.95)}
-                    className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-[#E5E5E0] bg-white px-2.5 py-1 text-xs font-semibold text-[#262626] hover:border-[#6B655E]"
+                    className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-[#E5E5E0] bg-white px-2.5 py-1 text-xs font-semibold text-[#262626] hover:border-brand"
                   >
-                    <Volume2 className="h-3.5 w-3.5 text-[#6B655E]" />
-                    Nghe bài mẫu
+                    <Volume2 className="h-3.5 w-3.5 text-brand" />
+                    Nghe mẫu
                   </button>
                 </div>
                 <div className="whitespace-pre-line text-base leading-loose text-[#262626]">
@@ -1199,18 +1447,21 @@ export default function WritingPage() {
                   />
                 </div>
                 {activePrompt.samplePinyin && (
-                  <p className="font-mono text-xs leading-relaxed text-[#6B655E]">
+                  <p className="font-mono text-xs text-[#6B655E]">
                     {activePrompt.samplePinyin}
                   </p>
                 )}
-                <p className="whitespace-pre-line border-t border-[#E5E5E0] pt-3 text-xs leading-relaxed text-[#57534E]">
+                <p className="whitespace-pre-line border-t border-[#E5E5E0] pt-2 text-xs text-[#57534E]">
                   {activePrompt.sampleVi}
                 </p>
               </div>
             )}
           </div>
-        </div>
-      )}
-    </div>
+        ) : (
+          <p className="py-10 text-center text-sm text-[#737373]">
+            Chưa có đề viết cho cấp độ này.
+          </p>
+        ))}
+    </SkillFocusLayout>
   );
 }

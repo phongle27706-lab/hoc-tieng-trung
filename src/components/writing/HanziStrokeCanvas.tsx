@@ -210,15 +210,26 @@ const COMMON_CHAR_META: Record<
   },
 };
 
+function extractValidSingleHanziChars(raw: string): string[] {
+  return raw.match(/[\u4e00-\u9fff]/g) ?? [];
+}
+
 function cleanPinyin(val?: string): string {
   const t = val?.trim() ?? "";
-  if (!t || t === "hàn zì") return "";
+  if (!t || t === "hàn zì" || t === "[]" || t === "—") return "";
   return t;
 }
 
 function cleanMeaning(val?: string): string {
   const t = val?.trim() ?? "";
-  if (!t || t.startsWith("Tra cứu") || t === "Chữ Hán luyện viết") return "";
+  if (
+    !t ||
+    t.startsWith("Tra cứu") ||
+    t === "Chữ Hán luyện viết" ||
+    t === "Chữ Hán"
+  ) {
+    return "";
+  }
   return t;
 }
 
@@ -625,23 +636,37 @@ export function HanziStrokeCanvas({
   pinyin,
   onComplete,
 }: HanziStrokeCanvasProps) {
-  const chars = useMemo(() => {
-    const filtered = Array.from(hanzi.trim()).filter((c) => c.trim().length > 0);
-    return filtered.length > 0 ? filtered : ["中"];
-  }, [hanzi]);
+  const chars = useMemo(
+    () => extractValidSingleHanziChars(hanzi),
+    [hanzi]
+  );
 
   const [selectedCharIdx, setSelectedCharIdx] = useState(0);
-  const activeChar = chars[Math.min(selectedCharIdx, chars.length - 1)] ?? "中";
+
+  useEffect(() => {
+    setSelectedCharIdx(0);
+  }, [hanzi]);
+
+  const activeChar =
+    chars.length > 0
+      ? chars[Math.min(selectedCharIdx, chars.length - 1)]
+      : "";
 
   const [hanziData, setHanziData] = useState<HanziWriterCharData | null>(() =>
-    hanziDataCache.get(activeChar) ?? null
+    activeChar ? (hanziDataCache.get(activeChar) ?? null) : null
   );
-  const [isLoadingData, setIsLoadingData] = useState<boolean>(
-    () => !hanziDataCache.has(activeChar)
+  const [isLoadingData, setIsLoadingData] = useState<boolean>(() =>
+    activeChar ? !hanziDataCache.has(activeChar) : false
   );
   const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
+    if (!activeChar) {
+      setHanziData(null);
+      setIsLoadingData(false);
+      return;
+    }
+
     const cached = hanziDataCache.get(activeChar);
     if (cached) {
       setHanziData(cached);
@@ -699,15 +724,27 @@ export function HanziStrokeCanvas({
     };
   }, [activeChar, retryNonce]);
 
-  const charPinyinHint = chars.length === 1 ? pinyin : undefined;
-  const charMeaningHint = chars.length === 1 ? meaningVi : undefined;
+  const isExactSingleChar =
+    chars.length === 1 && hanzi.trim() === chars[0];
+  const charPinyinHint = isExactSingleChar ? pinyin : undefined;
+  const charMeaningHint = isExactSingleChar ? meaningVi : undefined;
 
   const charMeta = useMemo(
-    () => resolveCharMetadata(activeChar, charPinyinHint, charMeaningHint),
+    () =>
+      activeChar
+        ? resolveCharMetadata(activeChar, charPinyinHint, charMeaningHint)
+        : {
+            pinyin: "",
+            meaningVi: "",
+            radical: "",
+            level: "HSK1" as HSKLevel,
+            subDifficulty: "basic" as SubDifficulty,
+          },
     [activeChar, charPinyinHint, charMeaningHint]
   );
 
   const template = useMemo<HanziStrokeTemplateFallback | null>(() => {
+    if (!activeChar) return null;
     if (hanziData) {
       return buildTemplateFromHanziData(
         activeChar,
@@ -1089,8 +1126,22 @@ export function HanziStrokeCanvas({
 
   const currentStroke = strokes[currentStrokeIdx];
   const displayMeta = template ?? charMeta;
-  const displayPinyin = displayMeta.pinyin;
-  const displayMeaning = displayMeta.meaningVi;
+  const displayPinyin = cleanPinyin(displayMeta.pinyin);
+  const displayMeaning = cleanMeaning(displayMeta.meaningVi);
+
+  if (chars.length === 0) {
+    return (
+      <div className="rounded-2xl border border-[#E5E5E0] bg-white p-6 text-center shadow-xs">
+        <AlertTriangle className="mx-auto mb-2 h-6 w-6 text-[#D97706]" />
+        <p className="text-sm font-semibold text-[#262626]">
+          Không có chữ Hán đơn hợp lệ để luyện viết
+        </p>
+        <p className="mt-1 text-xs text-[#737373]">
+          Khung Mễ tự cách (米字格) chỉ nhận ký tự chữ Hán giản thể hợp lệ và tự động loại bỏ dấu câu, chữ cái Latin hoặc chữ số.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-[#E5E5E0] bg-white p-5 sm:p-6 shadow-xs">
@@ -1235,9 +1286,11 @@ export function HanziStrokeCanvas({
               </div>
             </div>
 
-            <p className="text-sm font-medium text-[#4A4540]">
-              Nghĩa: <strong className="text-[#262626]">{displayMeaning}</strong>
-            </p>
+            {displayMeaning && (
+              <p className="text-sm font-medium text-[#4A4540]">
+                Nghĩa: <strong className="text-[#262626]">{displayMeaning}</strong>
+              </p>
+            )}
 
             {/* Current Stroke Instruction Banner */}
             {!charCompleted && currentStroke && (

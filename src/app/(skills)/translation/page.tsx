@@ -1,13 +1,10 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  ArrowLeftRight,
   BookOpen,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   Eye,
   EyeOff,
   Languages,
@@ -22,36 +19,35 @@ import {
   evaluateTranslation,
   type TranslationExercise,
 } from "@/data/translation";
+import { loadTranslationExtraByFilter } from "@/data/skills/translation";
 import { InteractiveChineseText } from "@/components/dictionary/InteractiveChineseText";
+import {
+  SkillFocusLayout,
+  type SkillFocusLessonItem,
+} from "@/components/ui/SkillFocusLayout";
+import { formatUnifiedHSKLabel } from "@/components/ui/UnifiedFilterBar";
 import { speakChinese } from "@/lib/speech";
 import { addXP, markLessonCompleted, recordMistake } from "@/lib/storage";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { UnifiedFilterBar } from "@/components/ui/UnifiedFilterBar";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/Card";
 import { Progress } from "@/components/ui/Progress";
 import type { HSKLevel, SubDifficulty } from "@/types";
 
 type TranslationDirection = "vi-to-zh" | "zh-to-vi";
 type SubFilter = "all" | SubDifficulty;
 
-const HSK_LEVELS: Array<"ALL" | HSKLevel | "HSK7-9"> = [
-  "ALL",
-  "HSK0",
-  "HSK1",
-  "HSK2",
-  "HSK3",
-  "HSK4",
-  "HSK5",
-  "HSK6",
-  "HSK7-9",
-];
+const HSK_ORDER: Record<HSKLevel, number> = {
+  HSK0: 0,
+  HSK1: 1,
+  HSK2: 2,
+  HSK3: 3,
+  HSK4: 4,
+  HSK5: 5,
+  HSK6: 6,
+  HSK7: 7,
+  HSK8: 8,
+  HSK9: 9,
+};
 
 interface NormalizedEvaluationResult {
   scorePercent: number;
@@ -75,7 +71,6 @@ function runSmartEvaluation(
         >)
       : null;
 
-  // Fallback / normalization so any shape returned by evaluateTranslation works seamlessly
   const requiredKws = exercise.requiredKeywords ?? [];
   const lowerInput = cleaned.toLowerCase();
 
@@ -126,7 +121,6 @@ function runSmartEvaluation(
     rawEval?.matchedKeywords ?? rawEval?.usedKeywords,
     defaultMatched
   );
-
   const missingKeywords = normalizeKwList(
     rawEval?.missingKeywords ?? rawEval?.missedKeywords,
     defaultMissing
@@ -165,7 +159,9 @@ function runSmartEvaluation(
 export default function TranslationPage() {
   const [direction, setDirection] =
     useState<TranslationDirection>("vi-to-zh");
-  const [selectedLevel, setSelectedLevel] = useState<"ALL" | HSKLevel | "HSK7-9">("ALL");
+  const [selectedLevel, setSelectedLevel] = useState<
+    "ALL" | HSKLevel | "HSK7-9"
+  >("ALL");
   const [subFilter, setSubFilter] = useState<SubFilter>("all");
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [userInput, setUserInput] = useState<string>("");
@@ -175,13 +171,44 @@ export default function TranslationPage() {
   const [evalResult, setEvalResult] =
     useState<NormalizedEvaluationResult | null>(null);
   const [awardedIds, setAwardedIds] = useState<Record<string, boolean>>({});
+  const [extraExercises, setExtraExercises] = useState<TranslationExercise[]>(
+    []
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    loadTranslationExtraByFilter(selectedLevel)
+      .then((loaded) => {
+        if (!cancelled) {
+          setExtraExercises(loaded);
+        }
+      })
+      .catch(() => {
+        // Keep base exercises if dynamic module load fails
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLevel]);
+
+  const allExercises = useMemo(() => {
+    const mergedMap = new Map<string, TranslationExercise>();
+    for (const ex of TRANSLATION_EXERCISES ?? []) {
+      mergedMap.set(ex.id, ex);
+    }
+    for (const ex of extraExercises) {
+      if (!mergedMap.has(ex.id)) {
+        mergedMap.set(ex.id, ex);
+      }
+    }
+    return Array.from(mergedMap.values()).sort(
+      (a, b) => HSK_ORDER[a.level] - HSK_ORDER[b.level]
+    );
+  }, [extraExercises]);
 
   const directionExercises = useMemo(
-    () =>
-      (TRANSLATION_EXERCISES ?? []).filter(
-        (ex) => ex.direction === direction
-      ),
-    [direction]
+    () => allExercises.filter((ex) => ex.direction === direction),
+    [allExercises, direction]
   );
 
   const levelExercises = useMemo(
@@ -196,49 +223,30 @@ export default function TranslationPage() {
     [directionExercises, selectedLevel]
   );
 
-  const basicCount = useMemo(
-    () =>
-      levelExercises.filter((ex) => ex.subDifficulty === "basic").length,
-    [levelExercises]
-  );
-  const advancedCount = useMemo(
-    () =>
-      levelExercises.filter((ex) => ex.subDifficulty === "advanced").length,
-    [levelExercises]
-  );
-
   const filteredExercises = useMemo(() => {
     if (subFilter === "all") return levelExercises;
     return levelExercises.filter((ex) => ex.subDifficulty === subFilter);
   }, [levelExercises, subFilter]);
 
+  const safeIndex = Math.min(
+    currentIndex,
+    Math.max(0, filteredExercises.length - 1)
+  );
   const currentExercise =
-    filteredExercises[currentIndex] ??
-    filteredExercises[0] ??
-    TRANSLATION_EXERCISES[0];
+    filteredExercises[safeIndex] ?? TRANSLATION_EXERCISES[0];
+
+  const completedIndices = useMemo(() => {
+    const set = new Set<number>();
+    filteredExercises.forEach((ex, idx) => {
+      if (awardedIds[ex.id]) set.add(idx);
+    });
+    return set;
+  }, [filteredExercises, awardedIds]);
 
   const resetCurrentState = () => {
     setUserInput("");
     setEvalResult(null);
     setShowReference(false);
-  };
-
-  const handleDirectionChange = (dir: TranslationDirection) => {
-    setDirection(dir);
-    setCurrentIndex(0);
-    resetCurrentState();
-  };
-
-  const handleLevelChange = (lvl: "ALL" | HSKLevel | "HSK7-9") => {
-    setSelectedLevel(lvl);
-    setCurrentIndex(0);
-    resetCurrentState();
-  };
-
-  const handleSubFilterChange = (sub: SubFilter) => {
-    setSubFilter(sub);
-    setCurrentIndex(0);
-    resetCurrentState();
   };
 
   const handleEvaluate = () => {
@@ -279,30 +287,45 @@ export default function TranslationPage() {
       ? currentExercise.referencePinyin
       : currentExercise?.sourcePinyin;
 
-  return (
-    <div className="mx-auto max-w-5xl space-y-4 pb-12">
-      {/* Compact Header & Direction Switcher */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <ArrowLeftRight className="h-4 w-4 text-brand" />
-          <h1 className="text-lg font-bold tracking-tight text-[#262626] sm:text-xl">
-            {direction === "vi-to-zh"
-              ? "Dịch Việt → Trung"
-              : "Dịch Trung → Việt"}
-          </h1>
-          <span className="hidden text-xs font-medium text-[#737373] sm:inline">
-            双语翻译 · Mức 0 → HSK 9
-          </span>
-        </div>
+  const sidebarLessons: SkillFocusLessonItem[] = useMemo(
+    () =>
+      filteredExercises.map((ex) => ({
+        id: ex.id,
+        title: ex.sourceText,
+        badge: ex.level,
+        subtitle: ex.topic,
+        completed: Boolean(awardedIds[ex.id]),
+      })),
+    [filteredExercises, awardedIds]
+  );
 
-        {/* Direction Toggle Pills */}
-        <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-white p-0.5">
+  return (
+    <SkillFocusLayout
+      backHref="/roadmap"
+      hskLevel={selectedLevel}
+      onHskLevelChange={(lvl) => {
+        setSelectedLevel(lvl as "ALL" | HSKLevel | "HSK7-9");
+        setCurrentIndex(0);
+        resetCurrentState();
+      }}
+      allowAllLevel
+      currentTitle={
+        currentExercise
+          ? `${direction === "vi-to-zh" ? "Việt → Trung" : "Trung → Việt"} · ${currentExercise.topic}`
+          : "Luyện Dịch Song Ngữ"
+      }
+      modeSlot={
+        <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
           <button
             type="button"
-            onClick={() => handleDirectionChange("vi-to-zh")}
-            className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+            onClick={() => {
+              setDirection("vi-to-zh");
+              setCurrentIndex(0);
+              resetCurrentState();
+            }}
+            className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
               direction === "vi-to-zh"
-                ? "bg-brand-soft text-brand-active ring-1 ring-brand"
+                ? "bg-white text-brand-active shadow-2xs ring-1 ring-brand/60"
                 : "text-[#737373] hover:text-[#262626]"
             }`}
           >
@@ -310,55 +333,58 @@ export default function TranslationPage() {
           </button>
           <button
             type="button"
-            onClick={() => handleDirectionChange("zh-to-vi")}
-            className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+            onClick={() => {
+              setDirection("zh-to-vi");
+              setCurrentIndex(0);
+              resetCurrentState();
+            }}
+            className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
               direction === "zh-to-vi"
-                ? "bg-brand-soft text-brand-active ring-1 ring-brand"
+                ? "bg-white text-brand-active shadow-2xs ring-1 ring-brand/60"
                 : "text-[#737373] hover:text-[#262626]"
             }`}
           >
             Trung → Việt
           </button>
         </div>
-      </div>
+      }
+      settingsBadge={showPinyin ? "Pinyin" : undefined}
+      settingsAriaLabel="Cài đặt luyện dịch"
+      settingsContent={
+        <>
+          <div className="space-y-1.5">
+            <span className="block text-xs font-semibold text-[#4A4540]">
+              Độ khó con
+            </span>
+            <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
+              {(
+                [
+                  { id: "all" as const, label: "Tất cả" },
+                  { id: "basic" as const, label: "Cơ bản" },
+                  { id: "advanced" as const, label: "Nâng cao" },
+                ]
+              ).map((sub) => (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() => {
+                    setSubFilter(sub.id);
+                    setCurrentIndex(0);
+                    resetCurrentState();
+                  }}
+                  className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+                    subFilter === sub.id
+                      ? "bg-white text-brand-active ring-1 ring-brand"
+                      : "text-[#737373] hover:text-[#262626]"
+                  }`}
+                >
+                  {sub.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
-      {/* Unified Single-Row Filter & Settings Bar */}
-      <UnifiedFilterBar
-        hskLevel={selectedLevel}
-        onHskLevelChange={(lvl) =>
-          handleLevelChange(lvl as "ALL" | HSKLevel | "HSK7-9")
-        }
-        allowAllLevel
-        difficulty={subFilter}
-        onDifficultyChange={(val) =>
-          handleSubFilterChange(val as "all" | SubDifficulty)
-        }
-        difficultyOptions={[
-          {
-            value: "all",
-            label: `Tất cả mức (${levelExercises.length})`,
-            shortLabel: "Độ khó",
-          },
-          {
-            value: "basic",
-            label: `Cơ bản (${basicCount})`,
-            shortLabel: "Cơ bản",
-          },
-          {
-            value: "advanced",
-            label: `Nâng cao (${advancedCount})`,
-            shortLabel: "Nâng cao",
-          },
-        ]}
-        rightSlot={
-          <span className="whitespace-nowrap text-[11px] font-medium text-[#737373]">
-            {filteredExercises.length} bài dịch
-          </span>
-        }
-        settingsBadge={showPinyin ? "Pinyin" : undefined}
-        settingsAriaLabel="Cài đặt luyện dịch"
-        settingsContent={
-          <label className="flex cursor-pointer items-center justify-between text-xs font-semibold text-[#4A4540]">
+          <label className="flex cursor-pointer items-center justify-between border-t border-[#F2F2F0] pt-2.5 text-xs font-semibold text-[#4A4540]">
             <span className="inline-flex items-center gap-1.5">
               <Languages className="h-3.5 w-3.5" /> Hiện phiên âm Pinyin
             </span>
@@ -378,432 +404,346 @@ export default function TranslationPage() {
               />
             </button>
           </label>
+        </>
+      }
+      sidebarTitle="Danh sách câu dịch"
+      sidebarSummary={`${formatUnifiedHSKLabel(selectedLevel)} · ${filteredExercises.length} câu`}
+      lessons={sidebarLessons}
+      activeLessonId={currentExercise?.id ?? ""}
+      onSelectLesson={(id) => {
+        const idx = filteredExercises.findIndex((ex) => ex.id === id);
+        if (idx !== -1) {
+          setCurrentIndex(idx);
+          resetCurrentState();
         }
-      />
-
-      {currentExercise && (
-        <>
-          {/* Progress Bar & Prev/Next */}
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex-1">
-              <Progress
-                value={
-                  ((currentIndex + 1) / Math.max(1, filteredExercises.length)) *
-                  100
-                }
-                label={`Bài dịch ${currentIndex + 1} / ${filteredExercises.length}`}
-                showPercent
-                size="sm"
-              />
+      }}
+      audioSlot={
+        currentExercise ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Badge variant="accent">{currentExercise.level}</Badge>
+              <Badge variant="default">
+                {currentExercise.subDifficulty === "advanced"
+                  ? "Nâng cao"
+                  : "Cơ bản"}
+              </Badge>
+              <Badge variant="outline">{currentExercise.topic}</Badge>
             </div>
-            <div className="flex items-center gap-2">
+
+            {currentExercise.direction === "zh-to-vi" && (
               <Button
                 variant="outline"
                 size="sm"
-                disabled={currentIndex === 0}
-                onClick={() => {
-                  setCurrentIndex((i) => Math.max(0, i - 1));
-                  resetCurrentState();
-                }}
+                onClick={() => speakChinese(currentExercise.sourceText, 0.95)}
               >
-                <ChevronLeft className="h-4 w-4" />
-                Bài trước
+                <Volume2 className="h-4 w-4 text-brand" />
+                Nghe câu gốc (zh-CN)
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={currentIndex >= filteredExercises.length - 1}
-                onClick={() => {
-                  setCurrentIndex((i) =>
-                    Math.min(filteredExercises.length - 1, i + 1)
-                  );
-                  resetCurrentState();
-                }}
+            )}
+          </div>
+        ) : undefined
+      }
+      pagination={{
+        currentIndex: safeIndex,
+        total: filteredExercises.length,
+        onPrev: () => {
+          setCurrentIndex((i) => Math.max(0, i - 1));
+          resetCurrentState();
+        },
+        onNext: () => {
+          setCurrentIndex((i) =>
+            Math.min(filteredExercises.length - 1, i + 1)
+          );
+          resetCurrentState();
+        },
+        onJump: (idx) => {
+          setCurrentIndex(idx);
+          resetCurrentState();
+        },
+        itemLabel: "Câu",
+        completedIndices,
+      }}
+    >
+      {currentExercise ? (
+        <div className="space-y-5">
+          {/* Source Sentence */}
+          <div className="space-y-2 rounded-2xl border border-[#E5E5E0] bg-[#FAF9F7] p-5">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
+              {currentExercise.direction === "vi-to-zh"
+                ? "Câu gốc Tiếng Việt cần dịch sang chữ Hán"
+                : "Câu gốc Chữ Hán cần dịch sang Tiếng Việt (nhấp từ để tra nghĩa)"}
+            </div>
+
+            {currentExercise.direction === "vi-to-zh" ? (
+              <p className="text-lg font-bold leading-relaxed text-[#262626] sm:text-xl">
+                {currentExercise.sourceText}
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="text-xl font-bold leading-relaxed text-[#262626] sm:text-2xl">
+                  <InteractiveChineseText
+                    text={currentExercise.sourceText}
+                    pinyin={currentExercise.sourcePinyin}
+                  />
+                </div>
+                {showPinyin && currentExercise.sourcePinyin && (
+                  <p className="font-mono text-xs text-[#6B655E]">
+                    {currentExercise.sourcePinyin}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Required Keywords Hints */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setShowKeywordHints((prev) => !prev)}
+                className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-[#6B655E] hover:text-[#262626]"
               >
-                Bài tiếp
-                <ChevronRight className="h-4 w-4" />
+                <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
+                {showKeywordHints ? "Ẩn từ khóa gợi ý" : "Hiện từ khóa gợi ý"}
+              </button>
+              <span className="text-[11px] text-[#737373]">
+                Nhấn từ khóa để chèn nhanh
+              </span>
+            </div>
+
+            {showKeywordHints &&
+              currentExercise.requiredKeywords &&
+              currentExercise.requiredKeywords.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {currentExercise.requiredKeywords.map((kw, i) => {
+                    const insertToken =
+                      currentExercise.direction === "vi-to-zh"
+                        ? kw.word
+                        : kw.meaningVi || kw.word;
+                    return (
+                      <button
+                        key={`${kw.word}-${i}`}
+                        type="button"
+                        onClick={() =>
+                          setUserInput((prev) =>
+                            currentExercise.direction === "vi-to-zh"
+                              ? `${prev}${insertToken}`
+                              : prev
+                                ? `${prev.trimEnd()} ${insertToken} `
+                                : `${insertToken} `
+                          )
+                        }
+                        className="cursor-pointer rounded-xl border border-[#E5E5E0] bg-white px-3 py-1.5 text-left text-xs transition-colors hover:border-brand hover:bg-brand-soft/40"
+                      >
+                        <span className="font-bold text-[#262626]">
+                          {kw.word}
+                        </span>
+                        {showPinyin && kw.pinyin && (
+                          <span className="ml-1 font-mono text-[11px] text-[#6B655E]">
+                            ({kw.pinyin})
+                          </span>
+                        )}
+                        {kw.meaningVi && (
+                          <span className="ml-1 text-[#737373]">
+                            — {kw.meaningVi}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+          </div>
+
+          {/* Translation Input */}
+          <div className="space-y-3">
+            <textarea
+              rows={3}
+              value={userInput}
+              onChange={(e) => setUserInput(e.target.value)}
+              placeholder={
+                currentExercise.direction === "vi-to-zh"
+                  ? "Nhập câu dịch tiếng Trung (chữ Hán) của bạn tại đây..."
+                  : "Nhập bản dịch tiếng Việt tự nhiên của bạn tại đây..."
+              }
+              className="w-full rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-4 text-base leading-relaxed text-[#262626] placeholder:text-[#737373]/70 focus:border-brand focus:bg-white focus:outline-none"
+            />
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={resetCurrentState}>
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Làm lại
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowReference((prev) => !prev)}
+                >
+                  {showReference ? (
+                    <>
+                      <EyeOff className="h-3.5 w-3.5" /> Ẩn đáp án mẫu
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="h-3.5 w-3.5" /> Xem đáp án mẫu
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={!userInput.trim()}
+                onClick={handleEvaluate}
+              >
+                <Sparkles className="h-4 w-4" />
+                Chấm điểm bản dịch
               </Button>
             </div>
           </div>
 
-          {/* Main Translation Workspace Card */}
-          <Card className="overflow-hidden">
-            <CardHeader className="border-b border-[#E5E5E0] bg-[#FAF9F7]">
+          {/* Evaluation Result */}
+          {evalResult && (
+            <div className="space-y-3.5 rounded-2xl border border-[#E5E5E0] bg-[#FAF9F7] p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="accent">{currentExercise.level}</Badge>
-                  <Badge variant="default">
-                    {currentExercise.subDifficulty === "advanced"
-                      ? "Nâng cao"
-                      : "Cơ bản"}
+                <div className="flex items-center gap-2.5">
+                  <span className="text-xl font-bold text-[#262626]">
+                    {evalResult.scorePercent}%
+                  </span>
+                  <Badge variant={evalResult.passed ? "success" : "warning"}>
+                    {evalResult.passed ? "Đạt chuẩn (≥ 70%)" : "Cần bổ sung"}
                   </Badge>
-                  <Badge variant="outline">{currentExercise.topic}</Badge>
                 </div>
-
-                {currentExercise.direction === "zh-to-vi" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      speakChinese(currentExercise.sourceText, 0.95)
-                    }
-                  >
-                    <Volume2 className="h-4 w-4 text-[#6B655E]" />
-                    Nghe câu gốc (zh-CN)
-                  </Button>
+                {evalResult.passed && (
+                  <Badge variant="success" className="gap-1">
+                    <Sparkles className="h-3.5 w-3.5" />+
+                    {evalResult.scorePercent >= 90 ? 25 : 17} XP
+                  </Badge>
                 )}
               </div>
-            </CardHeader>
 
-            <CardContent className="space-y-6 p-6">
-              {/* Source Sentence Box */}
-              <div className="space-y-2 rounded-2xl border border-[#E5E5E0] bg-[#FAF9F7] p-5">
-                <div className="text-xs font-semibold uppercase tracking-wider text-[#737373]">
-                  {currentExercise.direction === "vi-to-zh"
-                    ? "Câu gốc Tiếng Việt cần dịch sang chữ Hán:"
-                    : "Câu gốc Chữ Hán cần dịch sang Tiếng Việt (nhấp từ để tra từ điển):"}
-                </div>
+              <Progress value={evalResult.scorePercent} size="sm" />
 
-                {currentExercise.direction === "vi-to-zh" ? (
-                  <p className="text-lg font-bold leading-relaxed text-[#262626] sm:text-xl">
-                    {currentExercise.sourceText}
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                <div className="space-y-1.5 rounded-xl border border-[#BBF7D0] bg-[#F0FDF4] p-3">
+                  <p className="flex items-center gap-1.5 text-xs font-semibold text-[#15803D]">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    Từ khóa đúng ({evalResult.matchedKeywords.length})
                   </p>
-                ) : (
-                  <div className="space-y-1.5">
-                    <div className="text-xl font-bold leading-relaxed text-[#262626] sm:text-2xl">
-                      <InteractiveChineseText
-                        text={currentExercise.sourceText}
-                        pinyin={currentExercise.sourcePinyin}
-                      />
-                    </div>
-                    {showPinyin && currentExercise.sourcePinyin && (
-                      <p className="font-mono text-xs text-[#6B655E]">
-                        {currentExercise.sourcePinyin}
-                      </p>
+                  <div className="flex flex-wrap gap-1">
+                    {evalResult.matchedKeywords.length === 0 ? (
+                      <span className="text-xs text-[#737373]">Chưa khớp</span>
+                    ) : (
+                      evalResult.matchedKeywords.map((kw, i) => (
+                        <span
+                          key={`${kw.word}-${i}`}
+                          className="rounded-md border border-[#BBF7D0] bg-white px-2 py-0.5 text-xs font-semibold text-[#15803D]"
+                        >
+                          {kw.word}
+                        </span>
+                      ))
                     )}
                   </div>
-                )}
+                </div>
+
+                <div className="space-y-1.5 rounded-xl border border-[#FECACA] bg-[#FEF2F2] p-3">
+                  <p className="flex items-center gap-1.5 text-xs font-semibold text-[#B91C1C]">
+                    <XCircle className="h-3.5 w-3.5" />
+                    Từ khóa thiếu ({evalResult.missingKeywords.length})
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {evalResult.missingKeywords.length === 0 ? (
+                      <span className="text-xs font-medium text-[#15803D]">
+                        Đủ toàn bộ từ khóa!
+                      </span>
+                    ) : (
+                      evalResult.missingKeywords.map((kw, i) => (
+                        <span
+                          key={`${kw.word}-${i}`}
+                          className="rounded-md border border-[#FECACA] bg-white px-2 py-0.5 text-xs font-semibold text-[#B91C1C]"
+                        >
+                          {kw.word}
+                          {kw.meaningVi ? ` · ${kw.meaningVi}` : ""}
+                        </span>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
 
-              {/* Required Keywords Hint Box */}
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <button
-                    type="button"
-                    onClick={() => setShowKeywordHints((prev) => !prev)}
-                    className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-[#6B655E] hover:text-[#262626]"
-                  >
-                    <Lightbulb className="h-3.5 w-3.5" />
-                    {showKeywordHints
-                      ? "Ẩn từ khóa gợi ý"
-                      : "Hiện từ khóa gợi ý"}
-                  </button>
-                  <span className="text-[11px] text-[#737373]">
-                    Bấm vào từ khóa để chèn nhanh vào ô dịch
+              <div className="space-y-1.5 rounded-xl border border-[#E5E5E0] bg-white p-3.5 text-xs">
+                <div className="flex items-start gap-2 text-[#262626]">
+                  <BookOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#6B655E]" />
+                  <span>
+                    <strong>Cấu trúc: </strong>
+                    {currentExercise.grammarStructureVi}
                   </span>
                 </div>
-
-                {showKeywordHints &&
-                  currentExercise.requiredKeywords &&
-                  currentExercise.requiredKeywords.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                      {currentExercise.requiredKeywords.map((kw, i) => {
-                        const insertToken =
-                          currentExercise.direction === "vi-to-zh"
-                            ? kw.word
-                            : kw.meaningVi || kw.word;
-                        return (
-                          <button
-                            key={`${kw.word}-${i}`}
-                            type="button"
-                            onClick={() =>
-                              setUserInput((prev) =>
-                                currentExercise.direction === "vi-to-zh"
-                                  ? `${prev}${insertToken}`
-                                  : prev
-                                    ? `${prev.trimEnd()} ${insertToken} `
-                                    : `${insertToken} `
-                              )
-                            }
-                            className="cursor-pointer rounded-xl border border-[#E5E5E0] bg-white px-3 py-1.5 text-left text-xs transition-colors hover:border-[#6B655E] hover:bg-[#FAF9F7]"
-                          >
-                            <span className="font-bold text-[#262626]">
-                              {kw.word}
-                            </span>
-                            {showPinyin && kw.pinyin && (
-                              <span className="ml-1.5 font-mono text-[11px] text-[#6B655E]">
-                                ({kw.pinyin})
-                              </span>
-                            )}
-                            {kw.meaningVi && (
-                              <span className="ml-1.5 text-[#737373]">
-                                — {kw.meaningVi}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-              </div>
-
-              {/* User Translation Textarea */}
-              <div className="space-y-3">
-                <textarea
-                  rows={4}
-                  value={userInput}
-                  onChange={(e) => setUserInput(e.target.value)}
-                  placeholder={
-                    currentExercise.direction === "vi-to-zh"
-                      ? "Nhập câu dịch tiếng Trung (chữ Hán) của bạn tại đây..."
-                      : "Nhập bản dịch tiếng Việt chính xác và tự nhiên của bạn tại đây..."
-                  }
-                  className="w-full rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-4 text-base leading-relaxed text-[#262626] placeholder:text-[#737373]/70 focus:border-[#6B655E] focus:bg-white focus:outline-none"
-                />
-
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={resetCurrentState}
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      Làm lại
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setShowReference((prev) => !prev)}
-                    >
-                      {showReference ? (
-                        <>
-                          <EyeOff className="h-3.5 w-3.5" />
-                          Ẩn đáp án mẫu
-                        </>
-                      ) : (
-                        <>
-                          <Eye className="h-3.5 w-3.5" />
-                          Xem đáp án mẫu
-                        </>
-                      )}
-                    </Button>
-                  </div>
-
-                  <Button
-                    variant="primary"
-                    size="md"
-                    disabled={!userInput.trim()}
-                    onClick={handleEvaluate}
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    Chấm điểm bản dịch
-                  </Button>
+                <div className="flex items-start gap-2 text-[#92400E]">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#B45309]" />
+                  <span>
+                    <strong>Lỗi thường gặp: </strong>
+                    {currentExercise.commonMistakeVi}
+                  </span>
                 </div>
               </div>
+            </div>
+          )}
 
-              {/* Detailed Evaluation Result */}
-              {evalResult && (
-                <div className="space-y-4 rounded-2xl border border-[#E5E5E0] bg-[#FAF9F7] p-5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl font-bold text-[#262626]">
-                        Độ chính xác: {evalResult.scorePercent}%
-                      </span>
-                      <Badge
-                        variant={evalResult.passed ? "success" : "warning"}
-                      >
-                        {evalResult.passed
-                          ? "Đạt chuẩn (≥ 70%)"
-                          : "Cần bổ sung từ khóa / cấu trúc"}
-                      </Badge>
-                    </div>
-                    {evalResult.passed && (
-                      <Badge variant="success" className="gap-1">
-                        <Sparkles className="h-3.5 w-3.5" />+
-                        {evalResult.scorePercent >= 90 ? 25 : 17} XP
-                      </Badge>
-                    )}
+          {/* Reference Answer */}
+          {showReference && (
+            <div className="space-y-2.5 rounded-2xl border border-[#E5E5E0] bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-[#6B655E]">
+                  Bản dịch chuẩn tham khảo
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => speakChinese(chineseTextForAudio, 0.95)}
+                >
+                  <Volume2 className="h-3.5 w-3.5 text-brand" />
+                  Nghe tiếng Trung
+                </Button>
+              </div>
+
+              {currentExercise.direction === "vi-to-zh" ? (
+                <div className="space-y-1">
+                  <div className="text-lg font-bold text-[#262626]">
+                    <InteractiveChineseText
+                      text={currentExercise.referenceTarget}
+                      pinyin={currentExercise.referencePinyin}
+                    />
                   </div>
-
-                  <Progress value={evalResult.scorePercent} size="md" />
-
-                  {/* Keywords Used vs Missing */}
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5 rounded-xl border border-[#BBF7D0] bg-[#F0FDF4] p-3.5">
-                      <p className="flex items-center gap-1.5 text-xs font-semibold text-[#15803D]">
-                        <CheckCircle2 className="h-4 w-4" />
-                        Từ khóa đã dùng đúng ({evalResult.matchedKeywords.length})
-                      </p>
-                      {evalResult.matchedKeywords.length === 0 ? (
-                        <p className="text-xs text-[#737373]">
-                          Chưa khớp từ khóa mục tiêu nào.
-                        </p>
-                      ) : (
-                        <div className="flex flex-wrap gap-1.5">
-                          {evalResult.matchedKeywords.map((kw, i) => (
-                            <span
-                              key={`${kw.word}-${i}`}
-                              className="rounded-lg border border-[#BBF7D0] bg-white px-2.5 py-0.5 text-xs font-semibold text-[#15803D]"
-                            >
-                              {kw.word}
-                              {kw.meaningVi ? ` (${kw.meaningVi})` : ""}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="space-y-1.5 rounded-xl border border-[#FECACA] bg-[#FEF2F2] p-3.5">
-                      <p className="flex items-center gap-1.5 text-xs font-semibold text-[#B91C1C]">
-                        <XCircle className="h-4 w-4" />
-                        Từ khóa còn thiếu ({evalResult.missingKeywords.length})
-                      </p>
-                      {evalResult.missingKeywords.length === 0 ? (
-                        <p className="text-xs font-medium text-[#15803D]">
-                          Bạn đã sử dụng đầy đủ mọi từ khóa bắt buộc!
-                        </p>
-                      ) : (
-                        <div className="flex flex-wrap gap-1.5">
-                          {evalResult.missingKeywords.map((kw, i) => (
-                            <span
-                              key={`${kw.word}-${i}`}
-                              className="rounded-lg border border-[#FECACA] bg-white px-2.5 py-0.5 text-xs font-semibold text-[#B91C1C]"
-                            >
-                              {kw.word}
-                              {kw.pinyin ? ` [${kw.pinyin}]` : ""}
-                              {kw.meaningVi ? ` · ${kw.meaningVi}` : ""}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Grammar Structure & Common Mistake Analysis */}
-                  <div className="space-y-2 rounded-xl border border-[#E5E5E0] bg-white p-4 text-xs">
-                    <div className="flex items-start gap-2 text-[#262626]">
-                      <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-[#6B655E]" />
-                      <div>
-                        <span className="font-semibold">
-                          Phân tích cấu trúc ngữ pháp:{" "}
-                        </span>
-                        <span>{currentExercise.grammarStructureVi}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-2 text-[#92400E]">
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#B45309]" />
-                      <div>
-                        <span className="font-semibold">
-                          Lỗi sai người Việt thường gặp:{" "}
-                        </span>
-                        <span>{currentExercise.commonMistakeVi}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Reference Target Answer + Audio */}
-              {showReference && (
-                <div className="space-y-3 rounded-2xl border border-[#E5E5E0] bg-white p-5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-[#6B655E]">
-                      Bản dịch chuẩn tham khảo (标准参考译文)
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => speakChinese(chineseTextForAudio, 0.95)}
-                    >
-                      <Volume2 className="h-3.5 w-3.5 text-[#6B655E]" />
-                      Phát âm câu tiếng Trung (zh-CN)
-                    </Button>
-                  </div>
-
-                  {currentExercise.direction === "vi-to-zh" ? (
-                    <div className="space-y-1.5">
-                      <div className="text-lg font-bold text-[#262626]">
-                        <InteractiveChineseText
-                          text={currentExercise.referenceTarget}
-                          pinyin={currentExercise.referencePinyin}
-                        />
-                      </div>
-                      {showPinyin && chinesePinyinForDisplay && (
-                        <p className="font-mono text-xs text-[#6B655E]">
-                          {chinesePinyinForDisplay}
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-base font-bold text-[#262626]">
-                      {currentExercise.referenceTarget}
+                  {showPinyin && chinesePinyinForDisplay && (
+                    <p className="font-mono text-xs text-[#6B655E]">
+                      {chinesePinyinForDisplay}
                     </p>
                   )}
-
-                  {currentExercise.acceptedVariants &&
-                    currentExercise.acceptedVariants.length > 0 && (
-                      <div className="border-t border-[#F2F2F0] pt-2.5 text-xs text-[#737373]">
-                        <span className="font-semibold text-[#4A4540]">
-                          Các cách diễn đạt tương đương được chấp nhận:{" "}
-                        </span>
-                        {currentExercise.acceptedVariants.join("  |  ")}
-                      </div>
-                    )}
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
-
-      {/* Quick Exercise Picker */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Danh sách bài dịch ({filteredExercises.length} bài)
-          </CardTitle>
-          <CardDescription>
-            Chọn nhanh tình huống dịch giao tiếp, du lịch, hợp đồng ngoại thương, logistics và học thuật.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          {filteredExercises.map((ex, idx) => (
-            <button
-              key={ex.id}
-              type="button"
-              onClick={() => {
-                setCurrentIndex(idx);
-                resetCurrentState();
-              }}
-              className={`flex cursor-pointer items-start justify-between gap-2 rounded-xl border p-3 text-left transition-all ${
-                idx === currentIndex
-                  ? "border-[#6B655E] bg-[#F2F2F0]"
-                  : "border-[#E5E5E0] bg-white hover:border-[#A8A29E]"
-              }`}
-            >
-              <div className="min-w-0 space-y-0.5">
-                <div className="flex items-center gap-1.5">
-                  <Badge variant="outline">{ex.level}</Badge>
-                  <span className="text-[11px] font-medium text-[#6B655E]">
-                    {ex.subDifficulty === "advanced" ? "Nâng cao" : "Cơ bản"}
-                  </span>
-                  <span className="truncate text-xs text-[#737373]">
-                    · {ex.topic}
-                  </span>
-                </div>
-                <p className="truncate text-sm font-semibold text-[#262626]">
-                  {ex.sourceText}
+              ) : (
+                <p className="text-base font-bold text-[#262626]">
+                  {currentExercise.referenceTarget}
                 </p>
-              </div>
-              {awardedIds[ex.id] && (
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#15803D]" />
               )}
-            </button>
-          ))}
-        </CardContent>
-      </Card>
-    </div>
+
+              {currentExercise.acceptedVariants &&
+                currentExercise.acceptedVariants.length > 0 && (
+                  <p className="border-t border-[#F2F2F0] pt-2 text-xs text-[#737373]">
+                    <strong className="text-[#4A4540]">Cách diễn đạt khác: </strong>
+                    {currentExercise.acceptedVariants.join(" | ")}
+                  </p>
+                )}
+            </div>
+          )}
+        </div>
+      ) : (
+        <p className="py-10 text-center text-sm text-[#737373]">
+          Chưa có bài dịch cho cấp độ này.
+        </p>
+      )}
+    </SkillFocusLayout>
   );
 }

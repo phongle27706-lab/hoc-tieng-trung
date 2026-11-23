@@ -60,6 +60,10 @@ const DIFFICULTY_LABELS: Record<
   hard: { label: "Nâng cao", variant: "accent" },
 };
 
+function extractValidHanziChars(text: string): string[] {
+  return text.match(/[\u4e00-\u9fff]/g) ?? [];
+}
+
 function buildVocabExercises(
   sessionId: string,
   newWords: LessonVocabItem[]
@@ -173,10 +177,10 @@ export function StudyRoomClient({
   const grammarNotesVi = session.grammarNotesVi ?? [];
   const diffMeta = DIFFICULTY_LABELS[session.difficulty];
   const combinedExercises = useMemo(
-    () => [
-      ...session.exercises,
-      ...buildVocabExercises(session.id, newWords),
-    ],
+    () =>
+      session.exercises.length >= 15
+        ? session.exercises
+        : [...session.exercises, ...buildVocabExercises(session.id, newWords)],
     [session.id, session.exercises, newWords]
   );
 
@@ -524,20 +528,24 @@ export function StudyRoomClient({
                               </p>
                             )}
 
-                            {isSelected && (word.radical || word.strokeCount !== undefined) && (
-                              <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-[#737373]">
-                                {word.radical && (
-                                  <span className="rounded-md border border-[#E5E5E0] bg-white px-2 py-0.5">
-                                    Bộ thủ: {word.radical}
-                                  </span>
-                                )}
-                                {word.strokeCount !== undefined && (
-                                  <span className="rounded-md border border-[#E5E5E0] bg-white px-2 py-0.5">
-                                    {word.strokeCount} nét
-                                  </span>
-                                )}
-                              </div>
-                            )}
+                            {isSelected &&
+                              (word.radical ||
+                                (word.strokeCount !== undefined &&
+                                  extractValidHanziChars(word.hanzi).length === 1)) && (
+                                <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-[#737373]">
+                                  {word.radical && (
+                                    <span className="rounded-md border border-[#E5E5E0] bg-white px-2 py-0.5">
+                                      Bộ thủ: {word.radical}
+                                    </span>
+                                  )}
+                                  {word.strokeCount !== undefined &&
+                                    extractValidHanziChars(word.hanzi).length === 1 && (
+                                      <span className="rounded-md border border-[#E5E5E0] bg-white px-2 py-0.5">
+                                        {word.strokeCount} nét
+                                      </span>
+                                    )}
+                                </div>
+                              )}
                           </div>
 
                           <div className="flex shrink-0 flex-col items-end gap-2">
@@ -576,25 +584,41 @@ export function StudyRoomClient({
 
               {/* Right: Sticky HanziStrokeCanvas */}
               <div className="lg:sticky lg:top-6 lg:col-span-6">
-                {selectedWord && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-4 py-2.5">
-                      <span className="text-xs font-semibold text-[#4A4540]">
-                        Đang luyện viết:{" "}
-                        <strong className="text-[#262626]">
-                          {selectedWord.hanzi}
-                        </strong>{" "}
-                        ({selectedWord.pinyin}) — {selectedWord.meaningVi}
-                      </span>
+                {selectedWord && (() => {
+                  const cleanHanziChars = extractValidHanziChars(selectedWord.hanzi);
+                  const cleanHanzi = cleanHanziChars.join("");
+                  const isSingleChar =
+                    cleanHanziChars.length === 1 &&
+                    selectedWord.hanzi.trim() === cleanHanzi;
+
+                  if (cleanHanzi.length === 0) {
+                    return (
+                      <div className="rounded-2xl border border-[#E5E5E0] bg-[#FAF9F7] p-6 text-center text-xs text-[#737373]">
+                        Mục &ldquo;{selectedWord.hanzi}&rdquo; không chứa chữ Hán hợp lệ để luyện viết trên ô Mễ tự cách.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-4 py-2.5">
+                        <span className="text-xs font-semibold text-[#4A4540]">
+                          Đang luyện viết:{" "}
+                          <strong className="text-[#262626]">
+                            {selectedWord.hanzi}
+                          </strong>{" "}
+                          ({selectedWord.pinyin}) — {selectedWord.meaningVi}
+                        </span>
+                      </div>
+                      <HanziStrokeCanvas
+                        key={cleanHanzi}
+                        hanzi={cleanHanzi}
+                        pinyin={isSingleChar ? selectedWord.pinyin : undefined}
+                        meaningVi={isSingleChar ? selectedWord.meaningVi : undefined}
+                      />
                     </div>
-                    <HanziStrokeCanvas
-                      key={selectedWord.hanzi}
-                      hanzi={selectedWord.hanzi}
-                      pinyin={selectedWord.pinyin}
-                      meaningVi={selectedWord.meaningVi}
-                    />
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             </div>
           )}

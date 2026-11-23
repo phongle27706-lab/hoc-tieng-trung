@@ -60,7 +60,7 @@ export const AI_LEVEL_LIMITS: Record<AILevelLimit, AILevelLimitConfig> = {
     label: "Sơ cấp (HSK 1–2)",
     shortLabel: "HSK 1–2",
     promptRule:
-      "GIỚI HẠN TRÌNH ĐỘ HSK 1–2: Chỉ dùng từ vựng cơ bản HSK 1–2, câu ngắn (4-8 chữ Hán), kèm Pinyin đầy đủ. KHÔNG dùng thành ngữ hay cấu trúc phức tạp.",
+      "GIỚI HẠN TRÌNH ĐỘ HSK 1–2 (BẮT BUỘC NGẮN): Chỉ dùng từ vựng cơ bản HSK 1–2, MỖI CÂU CHỈ 5–8 CHỮ HÁN (vd: 你喜欢看新闻吗？), kèm Pinyin đầy đủ. KHÔNG dùng thành ngữ hay cấu trúc phức tạp.",
   },
   HSK3: {
     id: "HSK3",
@@ -263,8 +263,32 @@ function wrapPersonaTone(
   baseZh: string,
   basePinyin: string,
   baseVi: string,
-  hasError: boolean
+  hasError: boolean,
+  keepShort = false
 ): TutorReply {
+  if (keepShort) {
+    // At HSK1 or simplified replies, avoid adding long Chinese prefixes that break the 5-8 Hanzi limit
+    const viPrefix =
+      persona === "khinh-bi"
+        ? hasError
+          ? "Xì, cái này cũng sai à? Thôi được. "
+          : "Hừ, tạm được. "
+        : persona === "cuoi-nhao"
+          ? hasError
+            ? "Haha, bạn ơi là bạn! "
+            : "Ồ, hôm nay khá đấy nha! "
+          : persona === "vui-ve"
+            ? hasError
+              ? "Không sao đâu, bạn giỏi lắm! "
+              : "Tuyệt quá! "
+            : "";
+    return {
+      contentZh: baseZh,
+      contentPinyin: basePinyin,
+      contentVi: `${viPrefix}${baseVi}`,
+    };
+  }
+
   switch (persona) {
     case "khinh-bi":
       return {
@@ -275,20 +299,20 @@ function wrapPersonaTone(
           ? `Qiè, zhè dōu néng shuō cuò? Suànle. ${basePinyin}`
           : `Hēng, hái xíng ba. ${basePinyin}`,
         contentVi: hasError
-          ? `😒 Xì, cái này mà cũng sai? Thôi được. ${baseVi}`
-          : `😒 Hừ, tạm được. ${baseVi}`,
+          ? `Xì, cái này mà cũng sai? Thôi được. ${baseVi}`
+          : `Hừ, tạm được. ${baseVi}`,
       };
     case "cuoi-nhao":
       return {
         contentZh: hasError
-          ? `哈哈哈，你呀你！😂 ${baseZh}`
-          : `哟，今天开窍了嘛！😂 ${baseZh}`,
+          ? `哈哈哈，你呀你！${baseZh}`
+          : `哟，今天开窍了嘛！${baseZh}`,
         contentPinyin: hasError
           ? `Hāhāhā, nǐ ya nǐ! ${basePinyin}`
           : `Yō, jīntiān kāiqiào le ma! ${basePinyin}`,
         contentVi: hasError
-          ? `😂 Haha, bạn ơi là bạn! ${baseVi}`
-          : `😂 Ô, hôm nay khôn ra rồi nha! ${baseVi}`,
+          ? `Haha, bạn ơi là bạn! ${baseVi}`
+          : `Ô, hôm nay khôn ra rồi nha! ${baseVi}`,
       };
     case "vui-ve":
       return {
@@ -299,8 +323,8 @@ function wrapPersonaTone(
           ? `Méi guānxi o, nǐ hěn bàng ya! ${basePinyin}`
           : `Tài bàng le ya! ${basePinyin}`,
         contentVi: hasError
-          ? `😄 Không sao đâu, bạn giỏi lắm! ${baseVi}`
-          : `😄 Tuyệt quá! ${baseVi}`,
+          ? `Không sao đâu, bạn giỏi lắm! ${baseVi}`
+          : `Tuyệt quá! ${baseVi}`,
       };
     case "binh-thuong":
     default:
@@ -354,6 +378,21 @@ function generateRawMock(
   const text = message.trim();
   const lower = text.toLowerCase();
 
+  const isHsk1 = levelLimit === "HSK1";
+
+  // 0. Difficulty / too-long complaint -> IMMEDIATELY drop previous sentence and simplify to 3–5 Hanzi!
+  if (
+    /(khó quá|dài quá|không nói được|khó hiểu|chậm lại|ngắn thôi|ngắn hơn|dễ hơn|đơn giản hơn|nói ngắn|không theo kịp|太难|太长|不会说|太快)/i.test(
+      lower
+    )
+  ) {
+    const zh = "你好吗？";
+    const py = "Nǐ hǎo ma?";
+    const vi =
+      "Không sao đâu, mình bỏ câu cũ ngay nhé! Tách siêu ngắn từng từ cho bạn: 你 (bạn) + 好 (khỏe) + 吗 (không). Thử nói 3 chữ này thôi: 你好吗？ Bạn đọc thử được không?";
+    return wrapPersonaTone(persona, zh, py, vi, false, true);
+  }
+
   // 1. Check common Chinese grammar mistakes first
   for (const rule of GRAMMAR_CHECKS) {
     if (rule.pattern.test(text)) {
@@ -362,7 +401,8 @@ function generateRawMock(
         rule.recastZh,
         rule.recastPy,
         rule.recastVi,
-        true
+        true,
+        isHsk1
       );
       return {
         ...styled,
@@ -387,6 +427,83 @@ function generateRawMock(
     };
   }
 
+  // 3. Strict topic adherence (including politics, tech, travel, sports, movies, food, or ANY user-chosen topic)
+  if (/(chính trị|thời sự|tin tức|bầu cử|chính phủ|quốc tế|政治|新闻)/i.test(lower)) {
+    const zh = isHsk1
+      ? "你喜欢看新闻吗？"
+      : levelLimit === "HSK5"
+        ? "你平时怎么关注时事新闻呀？"
+        : "你每天都看新闻吗？";
+    const py = isHsk1
+      ? "Nǐ xǐhuan kàn xīnwén ma?"
+      : levelLimit === "HSK5"
+        ? "Nǐ píngshí zěnme guānzhù shíshì xīnwén ya?"
+        : "Nǐ měitiān dōu kàn xīnwén ma?";
+    const vi = isHsk1
+      ? "Ok luôn! Mình cùng nói về chủ đề chính trị nhé. Ở mức HSK 1 mình dùng câu siêu ngắn này: 你喜欢看新闻吗？ (Bạn có thích xem tin tức không?) Bạn trả lời thử xem?"
+      : "Hay đấy! Mình cùng trao đổi về chủ đề chính trị và thời sự nhé. Bạn có hay xem tin tức mỗi ngày không?";
+    return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
+  }
+
+  if (/(công nghệ|máy tính|điện thoại|lập trình|\bai\b|科技|手机)/i.test(lower)) {
+    const zh = isHsk1 ? "你喜欢用手机吗？" : "你平时喜欢用什么电子产品呢？";
+    const py = isHsk1
+      ? "Nǐ xǐhuan yòng shǒujī ma?"
+      : "Nǐ píngshí xǐhuan yòng shénme diànzǐ chǎnpǐn ne?";
+    const vi = isHsk1
+      ? "Tuyệt, mình nói về chủ đề công nghệ nhé! Câu ngắn HSK 1 nè: 你喜欢用手机吗？ (Bạn có thích dùng điện thoại không?) Bạn trả lời thử nhé?"
+      : "Chủ đề công nghệ rất thú vị! Bình thường bạn thích dùng thiết bị công nghệ nào nhất?";
+    return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
+  }
+
+  if (/(du lịch|đi chơi|trung quốc|bắc kinh|thượng hải|旅游|中国)/i.test(lower)) {
+    const zh = isHsk1 ? "你想去中国吗？" : "你最想去中国的哪个城市旅游呢？";
+    const py = isHsk1
+      ? "Nǐ xiǎng qù Zhōngguó ma?"
+      : "Nǐ zuì xiǎng qù Zhōngguó de nǎge chéngshì lǚyóu ne?";
+    const vi = isHsk1
+      ? "Ok luôn, mình nói về chủ đề du lịch nhé! Câu ngắn HSK 1 nè: 你想去中国吗？ (Bạn có muốn đi Trung Quốc không?) Bạn trả lời thử xem?"
+      : "Chủ đề du lịch quá vui! Bạn muốn đi thành phố nào ở Trung Quốc nhất nào?";
+    return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
+  }
+
+  if (/(thể thao|bóng đá|chạy bộ|tập gym|bơi|运动|足球)/i.test(lower)) {
+    const zh = isHsk1 ? "你喜欢运动吗？" : "你平时喜欢做什么运动呢？";
+    const py = isHsk1
+      ? "Nǐ xǐhuan yùndòng ma?"
+      : "Nǐ píngshí xǐhuan zuò shénme yùndòng ne?";
+    const vi = isHsk1
+      ? "Ok luôn, mình nói về thể thao nhé! Câu ngắn HSK 1 nè: 你喜欢运动吗？ (Bạn có thích thể thao không?) Bạn trả lời thử nhé?"
+      : "Chủ đề thể thao rất khỏe mạnh! Bình thường bạn thích tập môn thể thao nào?";
+    return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
+  }
+
+  if (/(âm nhạc|nghe nhạc|phim|xem phim|ca sĩ|音乐|电影)/i.test(lower)) {
+    const zh = isHsk1 ? "你喜欢看电影吗？" : "你最近看了什么好看的电影呢？";
+    const py = isHsk1
+      ? "Nǐ xǐhuan kàn diànyǐng ma?"
+      : "Nǐ zuìjìn kàn le shénme hǎokàn de diànyǐng ne?";
+    const vi = isHsk1
+      ? "Ok luôn, mình nói về phim ảnh và âm nhạc nhé! Câu ngắn HSK 1 nè: 你喜欢看电影吗？ (Bạn có thích xem phim không?) Bạn trả lời thử nhé?"
+      : "Tuyệt luôn! Gần đây bạn có xem bộ phim hay nghe bài hát nào hay không?";
+    return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
+  }
+
+  const explicitTopicMatch = text.match(
+    /(?:chủ đề|nói về|tán gẫu về|bàn về|học về|muốn nói về|về chuyện)\s+([^,.!?]{2,40})/i
+  );
+  if (explicitTopicMatch) {
+    const topicName = explicitTopicMatch[1].trim();
+    const zh = isHsk1 ? "你喜欢这个吗？" : "你对这个话题有什么看法呢？";
+    const py = isHsk1
+      ? "Nǐ xǐhuan zhège ma?"
+      : "Nǐ duì zhège huàtí yǒu shénme kànfǎ ne?";
+    const vi = isHsk1
+      ? `Ok luôn! Mình cùng nói về chủ đề ${topicName} nhé. Ở mức HSK 1 mình bắt đầu thật ngắn: 你喜欢这个吗？ (Bạn có thích điều này không?) Bạn trả lời thử nhé?`
+      : `Được luôn! Mình cùng nói về chủ đề ${topicName} nhé. Bạn có suy nghĩ gì về chủ đề này nào?`;
+    return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
+  }
+
   const rp = (options.roleplay ?? "").toLowerCase();
 
   if (
@@ -397,19 +514,16 @@ function generateRawMock(
     text.includes("买") ||
     text.includes("多少钱")
   ) {
-    const zh =
-      levelLimit === "HSK1"
-        ? "您好呀！微信、支付宝都能付哦。您今天想买点什么呢？"
-        : "您好呀！大单有出厂批发价哦。您先看看哪一款产品呢？";
-    const py =
-      levelLimit === "HSK1"
-        ? "Nínhǎo ya! Wēixìn, Zhīfùbǎo dōu néng fù o. Nín jīntiān xiǎng mǎi diǎn shénme ne?"
-        : "Nínhǎo ya! Dà dān yǒu chūchǎng pīfājià o. Nín xiān kànkan nǎ yì kuǎn chǎnpǐn ne?";
-    const vi =
-      levelLimit === "HSK1"
-        ? "Chào bạn nha! WeChat hay Alipay đều thanh toán được nhé. Hôm nay bạn muốn mua gì nào?"
-        : "Chào quý khách nha! Đơn lớn có giá sỉ tận xưởng nhé. Bạn muốn xem mẫu nào trước nào?";
-    return wrapPersonaTone(persona, zh, py, vi, false);
+    const zh = isHsk1
+      ? "你想买什么呢？"
+      : "您好呀！大单有出厂批发价哦。您先看看哪一款产品呢？";
+    const py = isHsk1
+      ? "Nǐ xiǎng mǎi shénme ne?"
+      : "Nínhǎo ya! Dà dān yǒu chūchǎng pīfājià o. Nín xiān kànkan nǎ yì kuǎn chǎnpǐn ne?";
+    const vi = isHsk1
+      ? "Chào bạn nha! Hôm nay bạn muốn mua gì nào?"
+      : "Chào quý khách nha! Đơn lớn có giá sỉ tận xưởng nhé. Bạn muốn xem mẫu nào trước nào?";
+    return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
   }
 
   if (
@@ -418,101 +532,100 @@ function generateRawMock(
     text.includes("考试") ||
     lower.includes("hsk")
   ) {
-    const zh =
-      levelLimit === "HSK1"
-        ? "欢迎参加口语练习！请先告诉我：你叫什么名字？你学习中文多长时间了？"
-        : "欢迎参加HSKK口语模拟测试！请用两三句话谈谈：你为什么学习中文，以及你的未来职业规划是什么？";
-    const py =
-      levelLimit === "HSK1"
-        ? "Huānyíng cānjiā kǒuyǔ liànxí! Qǐng xiān gàosu wǒ: Nǐ jiào shénme míngzi? Nǐ xuéxí Zhōngwén duō cháng shíjiān le?"
-        : "Huānyíng cānjiā HSKK kǒuyǔ mónǐ cèshì! Qǐng yòng liǎng sān jù huà tántan: Nǐ wèishénme xuéxí Zhōngwén, yǐjí nǐ de wèilái zhíyè guīhuà shì shénme?";
-    const vi =
-      levelLimit === "HSK1"
-        ? "Chào mừng bạn đến với phần luyện Nói! Hãy cho tôi biết: Bạn tên là gì? Bạn học tiếng Trung bao lâu rồi?"
-        : "Chào mừng đến với bài thi thử HSKK! Hãy dùng 2-3 câu chia sẻ: Vì sao bạn học tiếng Trung và kế hoạch nghề nghiệp tương lai của bạn là gì?";
-    return wrapPersonaTone(persona, zh, py, vi, false);
-  }
-
-  if (roleplayRole === "friend") {
-    const zh = "嗨！好久不见！你最近工作和学习忙不忙？周末我们去喝奶茶怎么样？";
-    const py = "Hāi! Hǎojiǔ bújiàn! Nǐ zuìjìn gōngzuò hé xuéxí máng bu máng? Zhōumò wǒmen qù hē nǎichá zěnmeyàng?";
-    const vi = "Chào cậu! Lâu rồi không gặp! Dạo này công việc và việc học có bận không? Cuối tuần tụi mình đi uống trà sữa nhé?";
-    return wrapPersonaTone(persona, zh, py, vi, false);
+    const zh = isHsk1
+      ? "你叫什么名字？"
+      : "欢迎参加HSKK口语模拟测试！请用两三句话谈谈：你为什么学习中文？";
+    const py = isHsk1
+      ? "Nǐ jiào shénme míngzi?"
+      : "Huānyíng cānjiā HSKK kǒuyǔ mónǐ cèshì! Qǐng yòng liǎng sān jù huà tántan: Nǐ wèishénme xuéxí Zhōngwén?";
+    const vi = isHsk1
+      ? "Chào mừng bạn luyện Nói HSK 1! Câu đầu tiên nhé: Bạn tên là gì?"
+      : "Chào mừng đến với bài thi thử HSKK! Hãy dùng 2-3 câu chia sẻ: Vì sao bạn học tiếng Trung?";
+    return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
   }
 
   if (/(你好|您好|嗨|早上好|晚上好|xin chào|chào)/i.test(lower)) {
-    const zh = "你好呀！今天过得怎么样？想聊点什么呢？";
-    const py = "Nǐ hǎo ya! Jīntiān guò de zěnmeyàng? Xiǎng liáo diǎn shénme ne?";
-    const vi =
-      "Chào bạn nha! Nếu muốn chào thật tự nhiên bằng tiếng Trung, bạn nói là 你好呀！今天过得怎么样？ Hôm nay của bạn thế nào rồi?";
-    return wrapPersonaTone(persona, zh, py, vi, false);
+    const zh = isHsk1 ? "你好！你好吗？" : "你好呀！今天过得怎么样？想聊点什么呢？";
+    const py = isHsk1
+      ? "Nǐ hǎo! Nǐ hǎo ma?"
+      : "Nǐ hǎo ya! Jīntiān guò de zěnmeyàng? Xiǎng liáo diǎn shénme ne?";
+    const vi = isHsk1
+      ? "Chào bạn nha! Ở mức HSK 1 mình chào ngắn gọn: 你好！你好吗？ Hôm nay bạn muốn nói về chủ đề gì nè?"
+      : "Chào bạn nha! Nếu muốn chào thật tự nhiên bằng tiếng Trung, bạn nói là 你好呀！今天过得怎么样？ Hôm nay của bạn thế nào rồi?";
+    return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
   }
 
   // Detect Vietnamese input (no Hanzi characters) -> reply naturally in Vietnamese + suggest 1 short Chinese sentence
   const hasHanzi = /\p{Script=Han}/u.test(text);
   if (!hasHanzi && /[\p{Script=Latin}]/u.test(text)) {
-    if (/(ăn|cơm|đói|trà sữa|cà phê|uống|ngon)/i.test(lower)) {
-      const zh = "我今天想喝奶茶呢，你喜欢喝什么呀？";
-      const py = "Wǒ jīntiān xiǎng hē nǎichá ne, nǐ xǐhuan hē shénme ya?";
-      const vi =
-        "Nghe hấp dẫn quá ha! Câu này nói tiếng Trung siêu tự nhiên là: 我今天想喝奶茶呢，你喜欢喝什么呀？ Bạn thích món nào nhất?";
-      return wrapPersonaTone(persona, zh, py, vi, false);
+    if (/(ăn|cơm|đói|trà sữa|cà phê|uống|ngon|đồ ăn)/i.test(lower)) {
+      const zh = isHsk1 ? "你喜欢喝茶吗？" : "我今天想喝奶茶呢，你喜欢喝什么呀？";
+      const py = isHsk1
+        ? "Nǐ xǐhuan hē chá ma?"
+        : "Wǒ jīntiān xiǎng hē nǎichá ne, nǐ xǐhuan hē shénme ya?";
+      const vi = isHsk1
+        ? "Nghe hấp dẫn quá! Mình nói về đồ ăn thức uống nhé. Câu ngắn HSK 1 nè: 你喜欢喝茶吗？ (Bạn thích uống trà không?) Bạn trả lời thử xem?"
+        : "Nghe hấp dẫn quá ha! Câu này nói tiếng Trung siêu tự nhiên là: 我今天想喝奶茶呢，你喜欢喝什么呀？ Bạn thích món nào nhất?";
+      return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
     }
     if (/(mệt|bận|làm việc|công việc|đi làm|học)/i.test(lower)) {
-      const zh = "最近挺忙吧？辛苦啦！晚上你想休息一下吗？";
-      const py = "Zuìjìn tǐng máng ba? Xīnkǔ la! Wǎnshang nǐ xiǎng xiūxi yíxià ma?";
-      const vi =
-        "Thương ghê, dạo này bạn bận lắm hả? Trong tiếng Trung mình có thể nói: 最近挺忙吧？辛苦啦！ Tối nay bạn tính nghỉ ngơi làm gì nè?";
-      return wrapPersonaTone(persona, zh, py, vi, false);
+      const zh = isHsk1 ? "你今天忙吗？" : "最近挺忙吧？辛苦啦！晚上你想休息一下吗？";
+      const py = isHsk1
+        ? "Nǐ jīntiān máng ma?"
+        : "Zuìjìn tǐng máng ba? Xīnkǔ la! Wǎnshang nǐ xiǎng xiūxi yíxià ma?";
+      const vi = isHsk1
+        ? "Thương ghê, dạo này bạn bận hả? Câu ngắn HSK 1 nè: 你今天忙吗？ (Hôm nay bạn có bận không?) Bạn trả lời thử nhé?"
+        : "Thương ghê, dạo này bạn bận lắm hả? Trong tiếng Trung mình có thể nói: 最近挺忙吧？辛苦啦！ Tối nay bạn tính nghỉ ngơi làm gì nè?";
+      return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
     }
     if (/(tên|giới thiệu|là ai|ở đâu|việt nam)/i.test(lower)) {
-      const zh = "我是越南人，很高兴认识你呀！你叫什么名字呢？";
-      const py = "Wǒ shì Yuènánrén, hěn gāoxìng rènshi nǐ ya! Nǐ jiào shénme míngzi ne?";
-      const vi =
-        "Chuẩn rồi đó! Để giới thiệu bản thân bằng tiếng Trung, bạn thử nói câu này nhé: 我是越南人，很高兴认识你呀！ Bạn muốn tập giới thiệu thêm nghề nghiệp không?";
-      return wrapPersonaTone(persona, zh, py, vi, false);
+      const zh = isHsk1 ? "你叫什么名字？" : "我是越南人，很高兴认识你呀！你叫什么名字呢？";
+      const py = isHsk1
+        ? "Nǐ jiào shénme míngzi?"
+        : "Wǒ shì Yuènánrén, hěn gāoxìng rènshi nǐ ya! Nǐ jiào shénme míngzi ne?";
+      const vi = isHsk1
+        ? "Chuẩn rồi đó! Mình tập giới thiệu bản thân ngắn gọn nhé: 你叫什么名字？ (Bạn tên là gì?) Bạn trả lời thử xem?"
+        : "Chuẩn rồi đó! Để giới thiệu bản thân bằng tiếng Trung, bạn thử nói câu này nhé: 我是越南人，很高兴认识你呀！ Bạn muốn tập giới thiệu thêm nghề nghiệp không?";
+      return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
     }
     if (/(cảm ơn|thanks|thank)/i.test(lower)) {
-      const zh = "不客气嘛！我们继续聊聊吧，你还想学哪句呢？";
-      const py = "Bú kèqi ma! Wǒmen jìxù liáoliao ba, nǐ hái xiǎng xué nǎ jù ne?";
-      const vi =
-        "Không có chi nè! Tiếng Trung mình đáp nhẹ nhàng là: 不客气嘛！ Bạn còn muốn tập nói câu nào tiếp theo không?";
-      return wrapPersonaTone(persona, zh, py, vi, false);
+      const zh = isHsk1 ? "不客气！你呢？" : "不客气嘛！我们继续聊聊吧，你还想学哪句呢？";
+      const py = isHsk1
+        ? "Bú kèqi! Nǐ ne?"
+        : "Bú kèqi ma! Wǒmen jìxù liáoliao ba, nǐ hái xiǎng xué nǎ jù ne?";
+      const vi = isHsk1
+        ? "Không có chi nè! Bạn còn muốn tập nói chủ đề nào nữa không?"
+        : "Không có chi nè! Tiếng Trung mình đáp nhẹ nhàng là: 不客气嘛！ Bạn còn muốn tập nói câu nào tiếp theo không?";
+      return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
     }
 
-    const zh =
-      levelLimit === "HSK1"
-        ? "真的吗？听起来不错呀！你平时喜欢做什么呢？"
-        : "原来如此呀！我也这么觉得呢。那你接下来打算怎么办呀？";
-    const py =
-      levelLimit === "HSK1"
-        ? "Zhēn de ma? Tīng qǐlái búcuò ya! Nǐ píngshí xǐhuan zuò shénme ne?"
-        : "Yuánlái rúcǐ ya! Wǒ yě zhème juéde ne. Nà nǐ jiēxiàlái dǎsuàn zěnme bàn ya?";
-    const vi =
-      levelLimit === "HSK1"
-        ? `Mình hiểu ý bạn rồi nè! Bạn có thể đáp bằng tiếng Trung là: 真的吗？听起来不错呀！ Bạn thử nói lại câu đó hoặc kể thêm cho BaoBao nghe nhé?`
-        : `Ồ, ra là vậy à! Nói bằng tiếng Trung tự nhiên sẽ là: 原来如此呀！我也这么觉得呢。 Thế tiếp theo bạn tính sao nè?`;
-    return wrapPersonaTone(persona, zh, py, vi, false);
+    const zh = isHsk1
+      ? "你今天开心吗？"
+      : "原来如此呀！我也这么觉得呢。那你接下来打算怎么办呀？";
+    const py = isHsk1
+      ? "Nǐ jīntiān kāixīn ma?"
+      : "Yuánlái rúcǐ ya! Wǒ yě zhème juéde ne. Nà nǐ jiēxiàlái dǎsuàn zěnme bàn ya?";
+    const vi = isHsk1
+      ? "Mình hiểu ý bạn rồi nè! Ở mức HSK 1 mình thử câu ngắn này nhé: 你今天开心吗？ (Hôm nay bạn có vui không?) Bạn trả lời thử xem?"
+      : "Ồ, ra là vậy à! Nói bằng tiếng Trung tự nhiên sẽ là: 原来如此呀！我也这么觉得呢。 Thế tiếp theo bạn tính sao nè?";
+    return wrapPersonaTone(persona, zh, py, vi, false, isHsk1);
   }
 
-  const defaultZh =
-    levelLimit === "HSK1"
-      ? `嗯嗯，“${text}”，我懂啦！那你今天吃了什么呀？`
-      : levelLimit === "HSK5"
-        ? `哦？“${text}”，挺有意思嘛！你平时也经常遇到这种事吗？`
-        : `哦？“${text}”，有意思呢！为什么这么说呀？`;
-  const defaultPy =
-    levelLimit === "HSK1"
-      ? `Ńg ńg, "${text}", wǒ dǒng la! Nà nǐ jīntiān chī le shénme ya?`
-      : levelLimit === "HSK5"
-        ? `Ò? "${text}", tǐng yǒuyìsi ma! Nǐ píngshí yě jīngcháng yùdào zhè zhǒng shì ma?`
-        : `Ò? "${text}", yǒuyìsi ne! Wèishénme zhème shuō ya?`;
-  const defaultVi =
-    levelLimit === "HSK1"
-      ? `Ừm ừm, "${text}", mình hiểu rồi! Thế hôm nay bạn ăn gì thế?`
-      : levelLimit === "HSK5"
-        ? `Ồ? "${text}", thú vị đấy chứ! Bình thường bạn cũng hay gặp chuyện kiểu này à?`
-        : `Ồ? "${text}", thú vị nè! Sao bạn lại nói vậy?`;
+  const defaultZh = isHsk1
+    ? "我懂啦！你开心吗？"
+    : levelLimit === "HSK5"
+      ? `哦？“${text}”，挺有意思嘛！你平时也经常遇到这种事吗？`
+      : `哦？“${text}”，有意思呢！为什么这么说呀？`;
+  const defaultPy = isHsk1
+    ? "Wǒ dǒng la! Nǐ kāixīn ma?"
+    : levelLimit === "HSK5"
+      ? `Ò? "${text}", tǐng yǒuyìsi ma! Nǐ píngshí yě jīngcháng yùdào zhè zhǒng shì ma?`
+      : `Ò? "${text}", yǒuyìsi ne! Wèishénme zhème shuō ya?`;
+  const defaultVi = isHsk1
+    ? "Mình hiểu rồi nè! Hôm nay bạn có vui không?"
+    : levelLimit === "HSK5"
+      ? `Ồ? "${text}", thú vị đấy chứ! Bình thường bạn cũng hay gặp chuyện kiểu này à?`
+      : `Ồ? "${text}", thú vị nè! Sao bạn lại nói vậy?`;
 
-  return wrapPersonaTone(persona, defaultZh, defaultPy, defaultVi, false);
+  return wrapPersonaTone(persona, defaultZh, defaultPy, defaultVi, false, isHsk1);
 }

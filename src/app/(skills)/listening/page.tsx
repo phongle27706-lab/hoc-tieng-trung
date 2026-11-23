@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   CheckCircle2,
@@ -15,14 +15,20 @@ import {
   XCircle,
 } from "lucide-react";
 import { InteractiveChineseText } from "@/components/dictionary/InteractiveChineseText";
-import { ResourceBanner } from "@/components/resources/ResourceBanner";
 import { TACTILE_SPRING } from "@/components/ui/MotionPrimitives";
-import { UnifiedFilterBar } from "@/components/ui/UnifiedFilterBar";
-import { getResourcesByCategory } from "@/data/resources";
+import {
+  SkillFocusLayout,
+  type SkillFocusLessonItem,
+} from "@/components/ui/SkillFocusLayout";
+import { formatUnifiedHSKLabel } from "@/components/ui/UnifiedFilterBar";
 import {
   DICTATION_LESSONS,
   type DictationLesson,
 } from "@/data/listening-dictation";
+import {
+  LISTENING_EXTRA_MANIFEST,
+  loadListeningExtraByLevel,
+} from "@/data/skills/listening";
 import {
   LISTENING_TASK_TABS,
   LISTENING_TASKS,
@@ -49,23 +55,12 @@ import type { HSKLevel, SubDifficulty } from "@/types";
 type ListeningMode = "dictation" | "tasks";
 type SubFilter = "all" | SubDifficulty;
 
-const HSK_LEVELS: Array<HSKLevel | "HSK7-9"> = [
-  "HSK0",
-  "HSK1",
-  "HSK2",
-  "HSK3",
-  "HSK4",
-  "HSK5",
-  "HSK6",
-  "HSK7-9",
-];
-
 const SPEEDS = [0.75, 0.95, 1.0, 1.25] as const;
 
-const BLANK_RATIOS: { value: BlankRatio; label: string }[] = [
-  { value: 20, label: "Mới bắt đầu (15–20%)" },
-  { value: 35, label: "Cơ bản (35%)" },
-  { value: 60, label: "Thử thách (55–60%)" },
+const BLANK_RATIOS: { value: BlankRatio; shortLabel: string; label: string }[] = [
+  { value: 20, shortLabel: "20%", label: "Mới bắt đầu (20%)" },
+  { value: 35, shortLabel: "35%", label: "Cơ bản (35%)" },
+  { value: 60, shortLabel: "60%", label: "Thử thách (60%)" },
 ];
 
 const DEFAULT_TASK_TABS: {
@@ -95,12 +90,18 @@ const DEFAULT_TASK_TABS: {
   },
 ];
 
-function getLevelDisplayLabel(level: HSKLevel | "ALL" | "HSK7-9"): string {
-  if (level === "ALL") return "Tất cả";
-  if (level === "HSK0") return "Mức 0";
-  if (level === "HSK7-9") return "HSK 7–9";
-  return level.replace("HSK", "HSK ");
-}
+const HSK_ORDER: Record<HSKLevel, number> = {
+  HSK0: 0,
+  HSK1: 1,
+  HSK2: 2,
+  HSK3: 3,
+  HSK4: 4,
+  HSK5: 5,
+  HSK6: 6,
+  HSK7: 7,
+  HSK8: 8,
+  HSK9: 9,
+};
 
 function getSubDifficulty(
   item: { id: string; subDifficulty?: SubDifficulty },
@@ -117,7 +118,6 @@ export default function ListeningPage() {
   const [mode, setMode] = useState<ListeningMode>("dictation");
   const [speed, setSpeed] = useState<number>(1.0);
   const [playingId, setPlayingId] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [autoAdvance, setAutoAdvance] = useState<boolean>(false);
   const [zhVoices, setZhVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedZhVoice, setSelectedZhVoice] = useState<string>("");
@@ -131,46 +131,40 @@ export default function ListeningPage() {
     return subscribeVoicesChanged(sync);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+    };
+  }, []);
+
   // ---- Dictation Mode State ----
   const [dictLevel, setDictLevel] = useState<HSKLevel | "ALL" | "HSK7-9">("HSK0");
   const [dictSubFilter, setDictSubFilter] = useState<SubFilter>("all");
+  const [extraDictLessons, setExtraDictLessons] = useState<DictationLesson[]>([]);
+  const [isLoadingExtraDict, setIsLoadingExtraDict] = useState<boolean>(false);
   const [blankRatio, setBlankRatio] = useState<BlankRatio>(20);
   const [selectedLessonId, setSelectedLessonId] = useState<string>(
     DICTATION_LESSONS[0]?.id ?? ""
   );
+  const [sentenceIndex, setSentenceIndex] = useState<number>(0);
   const [globalShowPinyin, setGlobalShowPinyin] = useState<boolean>(false);
-  // Keyed by `${sentenceId}:${tokenIndex}`
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [tabRevealed, setTabRevealed] = useState<Record<string, boolean>>({});
-  const [checkedSentences, setCheckedSentences] = useState<
-    Record<string, boolean>
-  >({});
-  const [revealedSentences, setRevealedSentences] = useState<
-    Record<string, boolean>
-  >({});
-  const [xpAwardedSentences, setXpAwardedSentences] = useState<
-    Record<string, boolean>
-  >({});
-  const [showTranslations, setShowTranslations] = useState<
-    Record<string, boolean>
-  >({});
-  const [showSentencePinyin, setShowSentencePinyin] = useState<
-    Record<string, boolean>
-  >({});
+  const [checkedSentences, setCheckedSentences] = useState<Record<string, boolean>>({});
+  const [revealedSentences, setRevealedSentences] = useState<Record<string, boolean>>({});
+  const [xpAwardedSentences, setXpAwardedSentences] = useState<Record<string, boolean>>({});
+  const [showTranslations, setShowTranslations] = useState<Record<string, boolean>>({});
+  const [showSentencePinyin, setShowSentencePinyin] = useState<Record<string, boolean>>({});
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   // ---- 4 Task Quiz Mode State ----
   const [taskLevel, setTaskLevel] = useState<"ALL" | HSKLevel | "HSK7-9">("ALL");
   const [taskSubFilter, setTaskSubFilter] = useState<SubFilter>("all");
-  const [activeTab, setActiveTab] =
-    useState<ListeningTaskType>("task1-single");
-  const [selectedAnswers, setSelectedAnswers] = useState<
-    Record<string, string>
-  >({});
-  const [shownTranscripts, setShownTranscripts] = useState<
-    Record<string, boolean>
-  >({});
+  const [activeTab, setActiveTab] = useState<ListeningTaskType>("task1-single");
+  const [taskIndex, setTaskIndex] = useState<number>(0);
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
+  const [shownTranscripts, setShownTranscripts] = useState<Record<string, boolean>>({});
   const [taskShowPinyin, setTaskShowPinyin] = useState<boolean>(false);
 
   const taskTabs = useMemo(() => {
@@ -194,9 +188,24 @@ export default function ListeningPage() {
     return DEFAULT_TASK_TABS;
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingExtraDict(true);
+    loadListeningExtraByLevel(dictLevel)
+      .then((loaded) => {
+        if (!cancelled) setExtraDictLessons(loaded);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingExtraDict(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dictLevel]);
+
   // ---- Dictation Filtering ----
   const levelLessons = useMemo<DictationLesson[]>(() => {
-    const byLevel =
+    const baseByLevel =
       dictLevel === "ALL"
         ? DICTATION_LESSONS
         : dictLevel === "HSK7-9"
@@ -204,16 +213,19 @@ export default function ListeningPage() {
               ["HSK7", "HSK8", "HSK9"].includes(l.level)
             )
           : DICTATION_LESSONS.filter((l) => l.level === dictLevel);
-    if (dictSubFilter === "all") return byLevel;
-    return byLevel.filter(
-      (l, idx) =>
-        getSubDifficulty(l, idx, byLevel.length) === dictSubFilter
+    const seen = new Set(baseByLevel.map((l) => l.id));
+    const merged = [
+      ...baseByLevel,
+      ...extraDictLessons.filter((l) => !seen.has(l.id)),
+    ].sort((a, b) => HSK_ORDER[a.level] - HSK_ORDER[b.level]);
+    if (dictSubFilter === "all") return merged;
+    return merged.filter(
+      (l, idx) => getSubDifficulty(l, idx, merged.length) === dictSubFilter
     );
-  }, [dictLevel, dictSubFilter]);
+  }, [dictLevel, dictSubFilter, extraDictLessons]);
 
   const activeLesson = useMemo<DictationLesson | undefined>(
-    () =>
-      levelLessons.find((l) => l.id === selectedLessonId) ?? levelLessons[0],
+    () => levelLessons.find((l) => l.id === selectedLessonId) ?? levelLessons[0],
     [levelLessons, selectedLessonId]
   );
 
@@ -229,18 +241,37 @@ export default function ListeningPage() {
     }));
   }, [activeLesson, blankRatio]);
 
-  // Flat ordered list of all blank keys in the active lesson for Tab/Enter navigation
-  const orderedBlankKeys = useMemo(() => {
-    const keys: string[] = [];
-    for (const item of tokenizedSentences) {
-      for (const tok of item.tokens) {
-        if (tok.isBlank) {
-          keys.push(`${item.sentence.id}:${tok.index}`);
-        }
+  const safeSentenceIndex = Math.min(
+    sentenceIndex,
+    Math.max(0, tokenizedSentences.length - 1)
+  );
+  const currentEntry = tokenizedSentences[safeSentenceIndex];
+
+  const currentBlankKeys = useMemo(() => {
+    if (!currentEntry) return [];
+    return currentEntry.tokens
+      .filter((tok) => tok.isBlank)
+      .map((tok) => `${currentEntry.sentence.id}:${tok.index}`);
+  }, [currentEntry]);
+
+  const completedSentenceIndices = useMemo(() => {
+    const set = new Set<number>();
+    tokenizedSentences.forEach((entry, idx) => {
+      const blanks = entry.tokens.filter((t) => t.isBlank);
+      if (
+        blanks.length > 0 &&
+        blanks.every((t) =>
+          checkDictationWord(
+            inputs[`${entry.sentence.id}:${t.index}`] ?? "",
+            t.cleanWord
+          )
+        )
+      ) {
+        set.add(idx);
       }
-    }
-    return keys;
-  }, [tokenizedSentences]);
+    });
+    return set;
+  }, [tokenizedSentences, inputs]);
 
   const resetLessonProgress = () => {
     setInputs({});
@@ -248,6 +279,7 @@ export default function ListeningPage() {
     setCheckedSentences({});
     setRevealedSentences({});
     setFocusedKey(null);
+    setSentenceIndex(0);
   };
 
   const handleChangeDictLevel = (lvl: HSKLevel | "ALL" | "HSK7-9") => {
@@ -257,7 +289,11 @@ export default function ListeningPage() {
     const matches =
       lvl === "ALL"
         ? DICTATION_LESSONS
-        : DICTATION_LESSONS.filter((l) => l.level === lvl);
+        : lvl === "HSK7-9"
+          ? DICTATION_LESSONS.filter((l) =>
+              ["HSK7", "HSK8", "HSK9"].includes(l.level)
+            )
+          : DICTATION_LESSONS.filter((l) => l.level === lvl);
     if (matches[0]) setSelectedLessonId(matches[0].id);
     resetLessonProgress();
   };
@@ -274,11 +310,14 @@ export default function ListeningPage() {
     resetLessonProgress();
   };
 
-  const playSentence = (id: string, textZh: string) => {
-    stopSpeaking();
-    setPlayingId(id);
-    speakChinese(textZh, speed, () => setPlayingId(null));
-  };
+  const playSentence = useCallback(
+    (id: string, textZh: string) => {
+      stopSpeaking();
+      setPlayingId(id);
+      speakChinese(textZh, speed, () => setPlayingId(null));
+    },
+    [speed]
+  );
 
   const playWholeLesson = () => {
     if (!activeLesson) return;
@@ -288,20 +327,20 @@ export default function ListeningPage() {
     speakChinese(fullText, speed, () => setPlayingId(null));
   };
 
-  const focusNextBlank = (currentKey: string, backwards = false) => {
-    const idx = orderedBlankKeys.indexOf(currentKey);
-    if (idx === -1) return;
-    const nextIdx = backwards ? idx - 1 : idx + 1;
-    if (nextIdx >= 0 && nextIdx < orderedBlankKeys.length) {
-      const nextKey = orderedBlankKeys[nextIdx];
-      inputRefs.current[nextKey]?.focus();
-    }
-  };
+  const goToSentence = useCallback(
+    (nextIdx: number) => {
+      if (nextIdx < 0 || nextIdx >= tokenizedSentences.length) return;
+      stopSpeaking();
+      setPlayingId(null);
+      setSentenceIndex(nextIdx);
+      setFocusedKey(null);
+    },
+    [tokenizedSentences.length]
+  );
 
   const handleHintSentence = (sentenceId: string) => {
     const entry = tokenizedSentences.find((s) => s.sentence.id === sentenceId);
     if (!entry) return;
-
     const blankTokens = entry.tokens.filter((t) => t.isBlank);
     if (blankTokens.length === 0) return;
 
@@ -313,7 +352,6 @@ export default function ListeningPage() {
           t.cleanWord
         )
     );
-
     if (!targetToken) {
       targetToken = blankTokens.find(
         (t) =>
@@ -323,7 +361,6 @@ export default function ListeningPage() {
           )
       );
     }
-
     if (!targetToken) return;
 
     const key = `${sentenceId}:${targetToken.index}`;
@@ -352,17 +389,13 @@ export default function ListeningPage() {
       addXP(15);
     }
 
-    if (allCorrect && autoAdvance) {
-      const idx = tokenizedSentences.findIndex((s) => s.sentence.id === sentenceId);
-      const next = tokenizedSentences[idx + 1];
-      const nextBlank = next?.tokens.find((t) => t.isBlank);
-      if (next && nextBlank) {
-        const nextKey = `${next.sentence.id}:${nextBlank.index}`;
-        setTimeout(() => {
-          inputRefs.current[nextKey]?.focus();
-          playSentence(next.sentence.id, next.sentence.textZh);
-        }, 350);
-      }
+    if (allCorrect && autoAdvance && safeSentenceIndex < tokenizedSentences.length - 1) {
+      const nextIdx = safeSentenceIndex + 1;
+      const next = tokenizedSentences[nextIdx];
+      setTimeout(() => {
+        setSentenceIndex(nextIdx);
+        if (next) playSentence(next.sentence.id, next.sentence.textZh);
+      }, 400);
     }
   };
 
@@ -406,24 +439,6 @@ export default function ListeningPage() {
     [taskLevel]
   );
 
-  const basicTaskCount = useMemo(
-    () =>
-      levelFilteredTasks.filter(
-        (t, idx) =>
-          getSubDifficulty(t, idx, levelFilteredTasks.length) === "basic"
-      ).length,
-    [levelFilteredTasks]
-  );
-
-  const advancedTaskCount = useMemo(
-    () =>
-      levelFilteredTasks.filter(
-        (t, idx) =>
-          getSubDifficulty(t, idx, levelFilteredTasks.length) === "advanced"
-      ).length,
-    [levelFilteredTasks]
-  );
-
   const tasks = useMemo(
     () =>
       levelFilteredTasks.filter((t, idx) => {
@@ -436,11 +451,25 @@ export default function ListeningPage() {
     [levelFilteredTasks, activeTab, taskSubFilter]
   );
 
-  const playTaskAudio = (task: ListeningTaskItem) => {
-    stopSpeaking();
-    setPlayingId(task.id);
-    speakChinese(task.audioZh, speed, () => setPlayingId(null));
-  };
+  const safeTaskIndex = Math.min(taskIndex, Math.max(0, tasks.length - 1));
+  const currentTask = tasks[safeTaskIndex];
+
+  const completedTaskIndices = useMemo(() => {
+    const set = new Set<number>();
+    tasks.forEach((t, idx) => {
+      if (selectedAnswers[t.id] === t.correctAnswer) set.add(idx);
+    });
+    return set;
+  }, [tasks, selectedAnswers]);
+
+  const playTaskAudio = useCallback(
+    (task: ListeningTaskItem) => {
+      stopSpeaking();
+      setPlayingId(task.id);
+      speakChinese(task.audioZh, speed, () => setPlayingId(null));
+    },
+    [speed]
+  );
 
   const handleSelectOption = (task: ListeningTaskItem, option: string) => {
     if (selectedAnswers[task.id]) return;
@@ -459,20 +488,269 @@ export default function ListeningPage() {
     }
   };
 
-  return (
-    <div className="mx-auto max-w-4xl space-y-3 pb-12">
-      {/* Compact Header: title + mode toggle */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-lg font-bold tracking-tight text-[#262626] sm:text-xl">
-          {mode === "dictation" ? "Nghe điền từ" : "Nghe hiểu HSK"}
-          <span className="ml-2 hidden text-xs font-medium text-[#737373] sm:inline">
-            听力 · zh-CN
-          </span>
-        </h1>
+  // Global Space & Alt+R shortcut for replaying audio
+  useEffect(() => {
+    const handleGlobalKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInput =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT");
 
+      if ((e.altKey && e.key.toLowerCase() === "r") || (!isInput && e.code === "Space")) {
+        e.preventDefault();
+        if (mode === "dictation" && currentEntry) {
+          playSentence(currentEntry.sentence.id, currentEntry.sentence.textZh);
+        } else if (mode === "tasks" && currentTask) {
+          playTaskAudio(currentTask);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKey);
+    return () => window.removeEventListener("keydown", handleGlobalKey);
+  }, [mode, currentEntry, currentTask, playSentence, playTaskAudio]);
+
+  // Sidebar items for each mode
+  const sidebarLessons: SkillFocusLessonItem[] = useMemo(() => {
+    if (mode === "dictation") {
+      return levelLessons.map((lesson) => ({
+        id: lesson.id,
+        title: lesson.titleZh ? `${lesson.titleZh} · ${lesson.title}` : lesson.title,
+        badge: lesson.level,
+        subtitle: lesson.subDifficulty === "advanced" ? "Nâng cao" : "Cơ bản",
+        meta: `${lesson.sentences.length} câu`,
+      }));
+    }
+    return taskTabs.map((tab) => {
+      const tabCount = levelFilteredTasks.filter((t, idx) => {
+        if (t.taskType !== tab.id) return false;
+        if (taskSubFilter === "all") return true;
+        return (
+          getSubDifficulty(t, idx, levelFilteredTasks.length) === taskSubFilter
+        );
+      }).length;
+      return {
+        id: tab.id,
+        title: tab.label,
+        subtitle: tab.desc,
+        meta: `${tabCount} câu`,
+      };
+    });
+  }, [mode, levelLessons, taskTabs, levelFilteredTasks, taskSubFilter]);
+
+  const totalDictSentences = useMemo(
+    () => levelLessons.reduce((sum, l) => sum + l.sentences.length, 0),
+    [levelLessons]
+  );
+
+  const extraManifestHint = useMemo(() => {
+    if (!isLoadingExtraDict) return "";
+    const pendingCount =
+      dictLevel === "ALL"
+        ? Object.values(LISTENING_EXTRA_MANIFEST).reduce((a, b) => a + b, 0)
+        : dictLevel === "HSK7-9"
+          ? LISTENING_EXTRA_MANIFEST.HSK7 +
+            LISTENING_EXTRA_MANIFEST.HSK8 +
+            LISTENING_EXTRA_MANIFEST.HSK9
+          : LISTENING_EXTRA_MANIFEST[dictLevel] ?? 0;
+    return pendingCount > 0 ? ` (+${pendingCount} đang tải...)` : "";
+  }, [isLoadingExtraDict, dictLevel]);
+
+  const currentLevelValue = mode === "dictation" ? dictLevel : taskLevel;
+  const sidebarSummary =
+    mode === "dictation"
+      ? `${formatUnifiedHSKLabel(dictLevel)} · ${levelLessons.length} bài${extraManifestHint} · ${totalDictSentences} câu`
+      : `${formatUnifiedHSKLabel(taskLevel)} · 4 Task · ${levelFilteredTasks.length} câu`;
+
+  const currentTitle =
+    mode === "dictation"
+      ? activeLesson
+        ? `${activeLesson.titleZh ? `${activeLesson.titleZh} — ` : ""}${activeLesson.title}`
+        : "Nghe điền từ"
+      : taskTabs.find((t) => t.id === activeTab)?.label ?? "Nghe hiểu HSK";
+
+  // Dictation derived states for current sentence
+  const sentence = currentEntry?.sentence;
+  const tokens = currentEntry?.tokens ?? [];
+  const blanks = tokens.filter((t) => t.isBlank);
+  const correctCount = sentence
+    ? blanks.filter((t) =>
+        checkDictationWord(inputs[`${sentence.id}:${t.index}`] ?? "", t.cleanWord)
+      ).length
+    : 0;
+  const isChecked = sentence ? checkedSentences[sentence.id] ?? false : false;
+  const isRevealed = sentence ? revealedSentences[sentence.id] ?? false : false;
+  const allCorrect = blanks.length > 0 && correctCount === blanks.length;
+  const showTrans = sentence ? showTranslations[sentence.id] ?? false : false;
+  const showPy = sentence
+    ? showSentencePinyin[sentence.id] ?? globalShowPinyin
+    : globalShowPinyin;
+
+  const settingsContent = (
+    <>
+      <div className="space-y-1.5">
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-[#4A4540]">
+          <Headphones className="h-3.5 w-3.5" /> Tốc độ đọc
+        </span>
+        <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
+          {SPEEDS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSpeed(s)}
+              className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+                speed === s
+                  ? "bg-white text-brand-active ring-1 ring-brand"
+                  : "text-[#737373] hover:text-[#262626]"
+              }`}
+            >
+              {s}x
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <label
+          htmlFor="listening-zh-voice"
+          className="block text-xs font-semibold text-[#4A4540]"
+        >
+          Giọng đọc tiếng Trung
+        </label>
+        <select
+          id="listening-zh-voice"
+          value={selectedZhVoice}
+          onChange={(e) => {
+            const val = e.target.value;
+            setSelectedZhVoice(val);
+            setPreferredVoiceName("zh", val || undefined);
+          }}
+          className="w-full rounded-lg border border-[#E5E5E0] bg-white px-2.5 py-1.5 text-xs text-[#262626] focus:border-brand focus:outline-none"
+        >
+          <option value="">Tự động chọn giọng chuẩn nhất</option>
+          {zhVoices.map((v) => (
+            <option key={v.name} value={v.name}>
+              {getFriendlyVoiceLabel(v)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="space-y-1.5 border-t border-[#F2F2F0] pt-2.5">
+        <span className="block text-xs font-semibold text-[#4A4540]">
+          Độ khó con
+        </span>
+        <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
+          {(
+            [
+              { id: "all" as const, label: "Tất cả" },
+              { id: "basic" as const, label: "Cơ bản" },
+              { id: "advanced" as const, label: "Nâng cao" },
+            ]
+          ).map((sub) => {
+            const active =
+              (mode === "dictation" ? dictSubFilter : taskSubFilter) === sub.id;
+            return (
+              <button
+                key={sub.id}
+                type="button"
+                onClick={() => {
+                  stopSpeaking();
+                  setPlayingId(null);
+                  if (mode === "dictation") {
+                    setDictSubFilter(sub.id);
+                    resetLessonProgress();
+                  } else {
+                    setTaskSubFilter(sub.id);
+                    setTaskIndex(0);
+                  }
+                }}
+                className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+                  active
+                    ? "bg-white text-brand-active ring-1 ring-brand"
+                    : "text-[#737373] hover:text-[#262626]"
+                }`}
+              >
+                {sub.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <label className="flex cursor-pointer items-center justify-between text-xs font-semibold text-[#4A4540]">
+        <span className="inline-flex items-center gap-1.5">
+          <Languages className="h-3.5 w-3.5" /> Hiện Pinyin
+        </span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={mode === "dictation" ? globalShowPinyin : taskShowPinyin}
+          onClick={() =>
+            mode === "dictation"
+              ? setGlobalShowPinyin((p) => !p)
+              : setTaskShowPinyin((p) => !p)
+          }
+          className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors ${
+            (mode === "dictation" ? globalShowPinyin : taskShowPinyin)
+              ? "bg-brand"
+              : "bg-[#D6D3CD]"
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+              (mode === "dictation" ? globalShowPinyin : taskShowPinyin)
+                ? "left-[18px]"
+                : "left-0.5"
+            }`}
+          />
+        </button>
+      </label>
+
+      {mode === "dictation" && (
+        <label className="flex cursor-pointer items-center justify-between text-xs font-semibold text-[#4A4540]">
+          <span>Tự động chuyển câu tiếp</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoAdvance}
+            onClick={() => setAutoAdvance((v) => !v)}
+            className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors ${
+              autoAdvance ? "bg-brand" : "bg-[#D6D3CD]"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+                autoAdvance ? "left-[18px]" : "left-0.5"
+              }`}
+            />
+          </button>
+        </label>
+      )}
+    </>
+  );
+
+  return (
+    <SkillFocusLayout
+      backHref="/roadmap"
+      hskLevel={currentLevelValue}
+      onHskLevelChange={(lvl) => {
+        if (mode === "dictation") {
+          handleChangeDictLevel(lvl as "ALL" | HSKLevel | "HSK7-9");
+        } else {
+          stopSpeaking();
+          setPlayingId(null);
+          setTaskLevel(lvl as "ALL" | HSKLevel | "HSK7-9");
+          setTaskIndex(0);
+        }
+      }}
+      allowAllLevel
+      currentTitle={currentTitle}
+      modeSlot={
         <div
           role="tablist"
-          className="inline-flex rounded-xl border border-[#E5E5E0] bg-white p-0.5"
+          className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5"
         >
           {(
             [
@@ -490,9 +768,9 @@ export default function ListeningPage() {
                 setPlayingId(null);
                 setMode(m.id);
               }}
-              className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+              className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
                 mode === m.id
-                  ? "bg-brand-soft text-brand-active ring-1 ring-brand"
+                  ? "bg-white text-brand-active shadow-2xs ring-1 ring-brand/60"
                   : "text-[#737373] hover:text-[#262626]"
               }`}
             >
@@ -500,914 +778,609 @@ export default function ListeningPage() {
             </button>
           ))}
         </div>
-      </div>
-
-      {/* Unified Single-Row Filter & Settings Bar */}
-      <UnifiedFilterBar
-        hskLevel={mode === "dictation" ? dictLevel : taskLevel}
-        onHskLevelChange={(lvl) => {
-          if (mode === "dictation") {
-            handleChangeDictLevel(lvl as "ALL" | HSKLevel | "HSK7-9");
-          } else {
-            stopSpeaking();
-            setPlayingId(null);
-            setTaskLevel(lvl as "ALL" | HSKLevel | "HSK7-9");
-          }
-        }}
-        allowAllLevel
-        difficulty={mode === "dictation" ? dictSubFilter : taskSubFilter}
-        onDifficultyChange={(val) => {
+      }
+      settingsBadge={`${speed}x`}
+      settingsAriaLabel="Cài đặt nghe: tốc độ, giọng đọc, Pinyin, độ khó"
+      settingsContent={settingsContent}
+      sidebarTitle={mode === "dictation" ? "Bài nghe điền từ" : "4 Task Nghe HSK"}
+      sidebarSummary={sidebarSummary}
+      lessons={sidebarLessons}
+      activeLessonId={
+        mode === "dictation" ? activeLesson?.id ?? "" : activeTab
+      }
+      onSelectLesson={(id) => {
+        if (mode === "dictation") {
+          handleSelectLesson(id);
+        } else {
           stopSpeaking();
           setPlayingId(null);
-          if (mode === "dictation") {
-            setDictSubFilter(val as "all" | SubDifficulty);
-            resetLessonProgress();
-          } else {
-            setTaskSubFilter(val as "all" | SubDifficulty);
-          }
-        }}
-        difficultyOptions={
-          mode === "dictation"
-            ? [
-                { value: "all", label: "Tất cả mức", shortLabel: "Độ khó" },
-                { value: "basic", label: "Cơ bản", shortLabel: "Cơ bản" },
-                { value: "advanced", label: "Nâng cao", shortLabel: "Nâng cao" },
-              ]
-            : [
-                {
-                  value: "all",
-                  label: `Tất cả mức (${levelFilteredTasks.length})`,
-                  shortLabel: "Độ khó",
-                },
-                {
-                  value: "basic",
-                  label: `Cơ bản (${basicTaskCount})`,
-                  shortLabel: "Cơ bản",
-                },
-                {
-                  value: "advanced",
-                  label: `Nâng cao (${advancedTaskCount})`,
-                  shortLabel: "Nâng cao",
-                },
-              ]
+          setActiveTab(id as ListeningTaskType);
+          setTaskIndex(0);
         }
-        rightSlot={
-          <span className="whitespace-nowrap text-[11px] font-medium text-[#737373]">
-            {mode === "dictation"
-              ? `${levelLessons.length} bài`
-              : `${tasks.length} câu`}
-          </span>
-        }
-        settingsBadge={`${speed}x`}
-        settingsAriaLabel="Cài đặt nghe: tốc độ, giọng đọc, Pinyin, độ khó, mức ẩn từ"
-        settingsContent={
-          <>
-            <div className="space-y-1.5">
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-[#4A4540]">
-                <Headphones className="h-3.5 w-3.5" /> Tốc độ đọc
-              </span>
-              <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
-                {SPEEDS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setSpeed(s)}
-                    className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
-                      speed === s
-                        ? "bg-white text-brand-active ring-1 ring-brand"
-                        : "text-[#737373] hover:text-[#262626]"
-                    }`}
-                  >
-                    {s}x
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label
-                htmlFor="listening-zh-voice"
-                className="block text-xs font-semibold text-[#4A4540]"
+      }}
+      audioSlot={
+        mode === "dictation" && sentence ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <motion.button
+                type="button"
+                whileTap={{ scale: 0.96 }}
+                transition={TACTILE_SPRING}
+                onClick={() => playSentence(sentence.id, sentence.textZh)}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-xs font-semibold text-white shadow-2xs transition-colors hover:bg-brand-hover"
               >
-                Giọng đọc tiếng Trung
-              </label>
-              <select
-                id="listening-zh-voice"
-                value={selectedZhVoice}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSelectedZhVoice(val);
-                  setPreferredVoiceName("zh", val || undefined);
-                }}
-                className="w-full rounded-lg border border-[#E5E5E0] bg-white px-2.5 py-1.5 text-xs text-[#262626] focus:border-brand focus:outline-none"
-              >
-                <option value="">Tự động chọn giọng chuẩn nhất</option>
-                {zhVoices.map((v) => (
-                  <option key={v.name} value={v.name}>
-                    {getFriendlyVoiceLabel(v)}
-                  </option>
-                ))}
-              </select>
-            </div>
+                <Play className="h-3.5 w-3.5" />
+                {playingId === sentence.id ? "Đang phát..." : "Nghe câu này"}
+              </motion.button>
 
-            <label className="flex cursor-pointer items-center justify-between text-xs font-semibold text-[#4A4540]">
-              <span className="inline-flex items-center gap-1.5">
-                <Languages className="h-3.5 w-3.5" /> Hiện Pinyin
-              </span>
               <button
                 type="button"
-                role="switch"
-                aria-checked={
-                  mode === "dictation" ? globalShowPinyin : taskShowPinyin
-                }
+                onClick={playWholeLesson}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-[#E5E5E0] bg-white px-3 py-2 text-xs font-semibold text-[#4A4540] transition-colors hover:border-brand hover:text-brand-active"
+              >
+                <Volume2 className="h-3.5 w-3.5" />
+                {playingId === activeLesson?.id ? "Đang phát bài..." : "Nghe cả bài"}
+              </button>
+
+              <span className="rounded-lg bg-white px-2 py-1 text-[11px] font-semibold text-[#737373] ring-1 ring-[#E5E5E0]">
+                {speed}x · Đúng {correctCount}/{blanks.length} ô
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs">
+              <button
+                type="button"
                 onClick={() =>
-                  mode === "dictation"
-                    ? setGlobalShowPinyin((p) => !p)
-                    : setTaskShowPinyin((p) => !p)
+                  setShowSentencePinyin((prev) => ({
+                    ...prev,
+                    [sentence.id]: !showPy,
+                  }))
                 }
-                className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors ${
-                  (mode === "dictation" ? globalShowPinyin : taskShowPinyin)
-                    ? "bg-brand"
-                    : "bg-[#D6D3CD]"
+                className={`inline-flex cursor-pointer items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  showPy
+                    ? "border-brand bg-brand-soft text-brand-active"
+                    : "border-[#E5E5E0] bg-white text-[#57534E] hover:border-brand"
                 }`}
               >
-                <span
-                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
-                    (mode === "dictation" ? globalShowPinyin : taskShowPinyin)
-                      ? "left-[18px]"
-                      : "left-0.5"
-                  }`}
-                />
+                <Languages className="h-3.5 w-3.5" />
+                Pinyin
               </button>
-            </label>
-
-            <label className="flex cursor-pointer items-center justify-between text-xs font-semibold text-[#4A4540]">
-              <span>Tự động chuyển câu tiếp</span>
               <button
                 type="button"
-                role="switch"
-                aria-checked={autoAdvance}
-                onClick={() => setAutoAdvance((v) => !v)}
-                className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors ${
-                  autoAdvance ? "bg-brand" : "bg-[#D6D3CD]"
+                onClick={() =>
+                  setShowTranslations((prev) => ({
+                    ...prev,
+                    [sentence.id]: !showTrans,
+                  }))
+                }
+                className={`inline-flex cursor-pointer items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  showTrans
+                    ? "border-brand bg-brand-soft text-brand-active"
+                    : "border-[#E5E5E0] bg-white text-[#57534E] hover:border-brand"
                 }`}
               >
-                <span
-                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
-                    autoAdvance ? "left-[18px]" : "left-0.5"
-                  }`}
-                />
+                {showTrans ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                Dịch
               </button>
-            </label>
-
-            {mode === "dictation" && (
-              <>
-                <div className="space-y-1.5 border-t border-[#F2F2F0] pt-3">
-                  <span className="block text-xs font-semibold text-[#4A4540]">
-                    Độ khó con
-                  </span>
-                  <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
-                    {(
-                      [
-                        { id: "all" as const, label: "Tất cả" },
-                        { id: "basic" as const, label: "Cơ bản" },
-                        { id: "advanced" as const, label: "Nâng cao" },
-                      ]
-                    ).map((sub) => (
-                      <button
-                        key={sub.id}
-                        type="button"
-                        onClick={() => {
-                          stopSpeaking();
-                          setPlayingId(null);
-                          setDictSubFilter(sub.id);
-                          resetLessonProgress();
-                        }}
-                        className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
-                          dictSubFilter === sub.id
-                            ? "bg-white text-brand-active ring-1 ring-brand"
-                            : "text-[#737373] hover:text-[#262626]"
-                        }`}
-                      >
-                        {sub.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <span className="block text-xs font-semibold text-[#4A4540]">
-                    Mức ẩn từ
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {BLANK_RATIOS.map((r) => (
-                      <button
-                        key={r.value}
-                        type="button"
-                        onClick={() => handleChangeRatio(r.value)}
-                        className={`cursor-pointer rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                          blankRatio === r.value
-                            ? "bg-brand-soft text-brand-active ring-1 ring-brand"
-                            : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-brand"
-                        }`}
-                      >
-                        {r.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-          </>
-        }
-      />
-
-      {/* ==================== MODE 1: DICTATION ==================== */}
-      {mode === "dictation" && (
-        <div className="space-y-3">
-          {/* Lesson Selector — compact horizontal scroll so Câu 1 fits in first viewport */}
-          <div className="no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-0.5">
-            {levelLessons.map((lesson, idx) => {
-              const isSelected = activeLesson?.id === lesson.id;
-              return (
-                <motion.button
-                  key={lesson.id}
+            </div>
+          </div>
+        ) : mode === "tasks" && currentTask ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <motion.button
+                type="button"
+                whileTap={{ scale: 0.96 }}
+                transition={TACTILE_SPRING}
+                onClick={() => playTaskAudio(currentTask)}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-brand px-4 py-2 text-xs font-semibold text-white shadow-2xs transition-colors hover:bg-brand-hover"
+              >
+                <Play className="h-3.5 w-3.5" />
+                {playingId === currentTask.id ? "Đang phát..." : "Nghe audio (zh-CN)"}
+              </motion.button>
+              <span className="rounded-lg bg-white px-2.5 py-1 text-[11px] font-semibold text-[#57534E] ring-1 ring-[#E5E5E0]">
+                {currentTask.level} ·{" "}
+                {currentTask.subDifficulty === "advanced" ? "Nâng cao" : "Cơ bản"}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                setShownTranscripts((prev) => ({
+                  ...prev,
+                  [currentTask.id]: !(prev[currentTask.id] ?? false),
+                }))
+              }
+              className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-[#E5E5E0] bg-white px-2.5 py-1.5 text-xs font-medium text-[#57534E] hover:border-brand"
+            >
+              {shownTranscripts[currentTask.id] ? (
+                <EyeOff className="h-3.5 w-3.5" />
+              ) : (
+                <Eye className="h-3.5 w-3.5" />
+              )}
+              Transcript
+            </button>
+          </div>
+        ) : null
+      }
+      shortcutHint={
+        mode === "dictation" ? (
+          <span>
+            <kbd className="rounded border border-[#E5E5E0] bg-white px-1.5 py-0.5 font-mono text-[10px] text-[#262626]">
+              Space
+            </kbd>{" "}
+            /{" "}
+            <kbd className="rounded border border-[#E5E5E0] bg-white px-1.5 py-0.5 font-mono text-[10px] text-[#262626]">
+              Alt+R
+            </kbd>{" "}
+            nghe lại ·{" "}
+            <kbd className="rounded border border-[#E5E5E0] bg-white px-1.5 py-0.5 font-mono text-[10px] text-[#262626]">
+              Tab
+            </kbd>{" "}
+            gợi ý ·{" "}
+            <kbd className="rounded border border-[#E5E5E0] bg-white px-1.5 py-0.5 font-mono text-[10px] text-[#262626]">
+              Enter
+            </kbd>{" "}
+            kiểm tra / câu tiếp
+          </span>
+        ) : (
+          <span>
+            <kbd className="rounded border border-[#E5E5E0] bg-white px-1.5 py-0.5 font-mono text-[10px] text-[#262626]">
+              Space
+            </kbd>{" "}
+            nghe lại audio · chọn đáp án trực tiếp
+          </span>
+        )
+      }
+      footerOptionsSlot={
+        mode === "dictation" && sentence ? (
+          <>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-[#737373]">
+                Ẩn từ:
+              </span>
+              {BLANK_RATIOS.map((r) => (
+                <button
+                  key={r.value}
                   type="button"
-                  whileTap={{ scale: 0.98 }}
-                  transition={TACTILE_SPRING}
-                  onClick={() => handleSelectLesson(lesson.id)}
-                  className={`w-48 shrink-0 cursor-pointer rounded-xl border px-3 py-2 text-left transition-colors ${
-                    isSelected
-                      ? "border-brand bg-brand-soft text-[#262626]"
-                      : "border-[#E5E5E0] bg-white text-[#262626] hover:border-brand"
+                  onClick={() => handleChangeRatio(r.value)}
+                  className={`cursor-pointer rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                    blankRatio === r.value
+                      ? "bg-brand-soft text-brand-active ring-1 ring-brand"
+                      : "border border-[#E5E5E0] bg-white text-[#57534E] hover:border-brand"
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={`text-[11px] font-semibold ${
-                        isSelected ? "text-brand-active" : "text-[#737373]"
-                      }`}
-                    >
-                      Bài {idx + 1} · {lesson.level}
-                    </span>
-                    <span className="rounded-md bg-[#F2F2F0] px-1.5 py-0.5 text-[10px] font-semibold text-[#4A4540]">
-                      {lesson.sentences.length} câu
-                    </span>
-                  </div>
-                  <div className="mt-0.5 line-clamp-1 text-xs font-semibold">
-                    {lesson.titleZh ? `${lesson.titleZh} · ` : ""}
-                    {lesson.title}
-                  </div>
-                </motion.button>
-              );
-            })}
+                  {r.shortLabel}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => handleHintSentence(sentence.id)}
+                disabled={allCorrect}
+                className="inline-flex cursor-pointer items-center gap-1 rounded-xl border border-[#E5E5E0] bg-white px-3 py-1.5 text-xs font-medium text-[#4A4540] hover:border-brand disabled:opacity-45"
+              >
+                <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
+                Gợi ý
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCheckSentence(sentence.id)}
+                className="inline-flex cursor-pointer items-center gap-1 rounded-xl bg-[#292524] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#4A4540]"
+              >
+                Kiểm tra
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setRevealedSentences((prev) => ({
+                    ...prev,
+                    [sentence.id]: !isRevealed,
+                  }))
+                }
+                className={`inline-flex cursor-pointer items-center gap-1 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  isRevealed
+                    ? "border-brand bg-brand-soft text-brand-active"
+                    : "border-[#E5E5E0] bg-white text-[#4A4540] hover:border-brand"
+                }`}
+              >
+                {isRevealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                Đáp án
+              </button>
+              <button
+                type="button"
+                onClick={() => handleResetSentence(sentence.id)}
+                title="Làm lại câu này"
+                className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-[#E5E5E0] bg-white p-1.5 text-[#737373] hover:text-[#262626]"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </>
+        ) : undefined
+      }
+      feedbackSlot={
+        mode === "dictation" && sentence && allCorrect ? (
+          <div className="flex items-center gap-2 rounded-xl border border-[#BBF7D0] bg-[#F0FDF4] px-3.5 py-2 text-xs font-semibold text-[#15803D]">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            <span>Chính xác toàn bộ ô trống! (+15 XP)</span>
           </div>
-
-          {/* Active Lesson Workspace */}
-          {activeLesson && (
-            <div className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#E5E5E0] bg-white px-4 py-2.5">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand-active">
-                      {activeLesson.level} ·{" "}
-                      {activeLesson.subDifficulty === "advanced"
-                        ? "Nâng cao"
-                        : "Cơ bản"}
-                    </span>
-                    <h2 className="truncate text-sm font-bold text-[#262626]">
-                      {activeLesson.titleZh} — {activeLesson.title}
-                    </h2>
-                  </div>
-                </div>
-                <motion.button
-                  type="button"
-                  whileHover={{ y: -1 }}
-                  whileTap={{ scale: 0.96 }}
-                  transition={TACTILE_SPRING}
-                  onClick={playWholeLesson}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-[#D6D3CD] bg-[#FAF9F7] px-3 py-1.5 text-xs font-semibold text-[#262626] hover:border-brand hover:text-brand-active"
-                >
-                  <Volume2 className="h-3.5 w-3.5" />
-                  {playingId === activeLesson.id
-                    ? "Đang phát..."
-                    : "Nghe cả bài"}
-                </motion.button>
+        ) : undefined
+      }
+      pagination={
+        mode === "dictation"
+          ? {
+              currentIndex: safeSentenceIndex,
+              total: tokenizedSentences.length,
+              onPrev: () => goToSentence(safeSentenceIndex - 1),
+              onNext: () => goToSentence(safeSentenceIndex + 1),
+              onJump: (idx) => goToSentence(idx),
+              itemLabel: "Câu",
+              completedIndices: completedSentenceIndices,
+            }
+          : {
+              currentIndex: safeTaskIndex,
+              total: tasks.length,
+              onPrev: () => {
+                stopSpeaking();
+                setPlayingId(null);
+                setTaskIndex((i) => Math.max(0, i - 1));
+              },
+              onNext: () => {
+                stopSpeaking();
+                setPlayingId(null);
+                setTaskIndex((i) => Math.min(tasks.length - 1, i + 1));
+              },
+              onJump: (idx) => {
+                stopSpeaking();
+                setPlayingId(null);
+                setTaskIndex(idx);
+              },
+              itemLabel: "Câu",
+              completedIndices: completedTaskIndices,
+            }
+      }
+    >
+      {/* ==================== MODE 1: SINGLE-SENTENCE DICTATION ==================== */}
+      {mode === "dictation" &&
+        (sentence ? (
+          <div className="space-y-4">
+            {showPy && sentence.pinyin && (
+              <div className="rounded-xl bg-[#F2F2F0]/70 px-3.5 py-2 font-mono text-xs text-[#6B655E]">
+                Pinyin: {sentence.pinyin}
               </div>
+            )}
 
-              {/* Single compact keyboard shortcut hint bar at top of exercise */}
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-3.5 py-1.5 text-[11px] text-[#737373]">
-                <span className="font-semibold text-[#4A4540]">Phím tắt:</span>
-                <span>
-                  <kbd className="rounded border border-[#E5E5E0] bg-white px-1.5 py-0.5 font-mono text-[10px] text-[#262626]">
-                    Tab
-                  </kbd>{" "}
-                  điền gợi ý ô trống
-                </span>
-                <span>
-                  <kbd className="rounded border border-[#E5E5E0] bg-white px-1.5 py-0.5 font-mono text-[10px] text-[#262626]">
-                    Enter
-                  </kbd>{" "}
-                  kiểm tra &amp; nhảy ô tiếp
-                </span>
-                <span>
-                  <kbd className="rounded border border-[#E5E5E0] bg-white px-1.5 py-0.5 font-mono text-[10px] text-[#262626]">
-                    Alt+R
-                  </kbd>{" "}
-                  nghe lại câu
-                </span>
-              </div>
-
-              {/* Sentence Cards */}
-              {tokenizedSentences.map(({ sentence, tokens }, sIdx) => {
-                const blanks = tokens.filter((t) => t.isBlank);
-                const correctCount = blanks.filter((t) =>
-                  checkDictationWord(
-                    inputs[`${sentence.id}:${t.index}`] ?? "",
-                    t.cleanWord
-                  )
-                ).length;
-                const isChecked = checkedSentences[sentence.id] ?? false;
-                const isRevealed = revealedSentences[sentence.id] ?? false;
-                const allCorrect =
-                  blanks.length > 0 && correctCount === blanks.length;
-                const showTrans = showTranslations[sentence.id] ?? false;
-                const showPy =
-                  showSentencePinyin[sentence.id] ?? globalShowPinyin;
-
-                return (
-                  <div
-                    key={sentence.id}
-                    className="space-y-4 rounded-2xl border border-[#E5E5E0] bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-                  >
-                    {/* Top Row */}
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="rounded-md bg-[#F2F2F0] px-2.5 py-0.5 text-xs font-semibold text-[#4A4540]">
-                          Câu {sIdx + 1}
-                        </span>
-                        <span className="text-xs font-medium text-[#737373]">
-                          Đúng {correctCount}/{blanks.length} ô
-                        </span>
-                        {allCorrect && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-[#F0FDF4] px-2 py-0.5 text-[11px] font-semibold text-[#15803D]">
-                            <CheckCircle2 className="h-3 w-3" /> Hoàn thành (+15 XP)
-                          </span>
+            <div className="min-h-[120px] rounded-2xl border border-[#E5E5E0] bg-[#FAF9F7] p-5 text-xl leading-loose text-[#262626] sm:p-6">
+              <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-3">
+                {tokens.map((tok) => {
+                  if (!tok.isBlank) {
+                    return (
+                      <span
+                        key={tok.index}
+                        className="inline-flex items-baseline"
+                      >
+                        {tok.cleanWord ? (
+                          <>
+                            {tok.punctuationBefore && (
+                              <span>{tok.punctuationBefore}</span>
+                            )}
+                            <InteractiveChineseText text={tok.cleanWord} />
+                            {tok.punctuationAfter && (
+                              <span>{tok.punctuationAfter}</span>
+                            )}
+                          </>
+                        ) : (
+                          <span>{tok.raw}</span>
                         )}
-                      </div>
+                      </span>
+                    );
+                  }
 
-                      <div className="flex flex-wrap items-center gap-2">
-                        <motion.button
-                          type="button"
-                          whileTap={{ scale: 0.95 }}
-                          transition={TACTILE_SPRING}
-                          onClick={() =>
-                            playSentence(sentence.id, sentence.textZh)
-                          }
-                          className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-[#D6D3CD] bg-[#FAF9F7] px-3 py-1.5 text-xs font-semibold text-[#262626] hover:border-brand hover:text-brand-active"
-                        >
-                          <Play className="h-3.5 w-3.5" />
-                          {playingId === sentence.id
-                            ? "Đang phát..."
-                            : "Nghe câu"}
-                        </motion.button>
+                  const key = `${sentence.id}:${tok.index}`;
+                  const val = inputs[key] ?? "";
+                  const isTabRevealed = tabRevealed[key] ?? false;
+                  const isWordCorrect = checkDictationWord(val, tok.cleanWord);
+                  const isWordWrong =
+                    (isChecked || val.trim().length >= tok.cleanWord.length) &&
+                    val.trim().length > 0 &&
+                    !isWordCorrect;
 
-                        <button
-                          type="button"
-                          onClick={() => handleHintSentence(sentence.id)}
-                          disabled={allCorrect}
-                          className="inline-flex cursor-pointer items-center gap-1 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-3 py-1.5 text-xs font-medium text-[#4A4540] hover:border-brand disabled:opacity-45"
-                        >
-                          <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
-                          Gợi ý
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleCheckSentence(sentence.id)}
-                          className="inline-flex cursor-pointer items-center gap-1 rounded-xl bg-brand px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-brand-hover"
-                        >
-                          Kiểm tra
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setRevealedSentences((prev) => ({
-                              ...prev,
-                              [sentence.id]: !isRevealed,
-                            }))
-                          }
-                          className={`inline-flex cursor-pointer items-center gap-1 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${
-                            isRevealed
-                              ? "border-brand bg-brand-soft text-brand-active"
-                              : "border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-brand"
+                  if (isWordCorrect && isChecked) {
+                    return (
+                      <span
+                        key={tok.index}
+                        className="inline-flex items-baseline"
+                      >
+                        {tok.punctuationBefore && (
+                          <span>{tok.punctuationBefore}</span>
+                        )}
+                        <span
+                          className={`rounded-lg border px-2 py-0.5 font-semibold ${
+                            isTabRevealed
+                              ? "border-[#FDE68A] bg-[#FFFBEB] text-[#92400E]"
+                              : "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D]"
                           }`}
                         >
-                          {isRevealed ? (
-                            <EyeOff className="h-3.5 w-3.5" />
-                          ) : (
-                            <Eye className="h-3.5 w-3.5" />
-                          )}
-                          {isRevealed ? "Ẩn đáp án" : "Hiện đáp án"}
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleResetSentence(sentence.id)}
-                          className="inline-flex cursor-pointer items-center gap-1 rounded-xl border border-[#E5E5E0] bg-white px-2.5 py-1.5 text-xs font-medium text-[#737373] hover:text-[#262626]"
-                          title="Làm lại câu này"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Optional Pinyin Line */}
-                    {showPy && sentence.pinyin && (
-                      <div className="rounded-lg bg-[#F2F2F0]/70 px-3 py-1.5 font-mono text-xs text-[#6B655E]">
-                        Pinyin: {sentence.pinyin}
-                      </div>
-                    )}
-
-                    {/* Inline Dictation Sentence with Auto-Sizing Inputs */}
-                    <div className="rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-4 text-lg leading-loose text-[#262626]">
-                      <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-2.5">
-                        {tokens.map((tok) => {
-                          if (!tok.isBlank) {
-                            return (
-                              <span
-                                key={tok.index}
-                                className="inline-flex items-baseline"
-                              >
-                                {tok.cleanWord ? (
-                                  <>
-                                    {tok.punctuationBefore && (
-                                      <span>{tok.punctuationBefore}</span>
-                                    )}
-                                    <InteractiveChineseText
-                                      text={tok.cleanWord}
-                                    />
-                                    {tok.punctuationAfter && (
-                                      <span>{tok.punctuationAfter}</span>
-                                    )}
-                                  </>
-                                ) : (
-                                  <span>{tok.raw}</span>
-                                )}
-                              </span>
-                            );
-                          }
-
-                          const key = `${sentence.id}:${tok.index}`;
-                          const val = inputs[key] ?? "";
-                          const isTabRevealed = tabRevealed[key] ?? false;
-                          const isWordCorrect = checkDictationWord(
-                            val,
-                            tok.cleanWord
-                          );
-                          const isWordWrong =
-                            (isChecked ||
-                              val.trim().length >= tok.cleanWord.length) &&
-                            val.trim().length > 0 &&
-                            !isWordCorrect;
-
-                          if (isWordCorrect && isChecked) {
-                            return (
-                              <span
-                                key={tok.index}
-                                className="inline-flex items-baseline"
-                              >
-                                {tok.punctuationBefore && (
-                                  <span>{tok.punctuationBefore}</span>
-                                )}
-                                <span
-                                  className={`rounded-lg border px-2 py-0.5 font-semibold ${
-                                    isTabRevealed
-                                      ? "border-[#FDE68A] bg-[#FFFBEB] text-[#92400E]"
-                                      : "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D]"
-                                  }`}
-                                >
-                                  <InteractiveChineseText
-                                    text={tok.cleanWord}
-                                  />
-                                </span>
-                                {tok.punctuationAfter && (
-                                  <span>{tok.punctuationAfter}</span>
-                                )}
-                              </span>
-                            );
-                          }
-
-                          const widthCh = Math.max(
-                            tok.cleanWord.length * 2 + 3,
-                            val.length * 2 + 3,
-                            6
-                          );
-
-                          let inputStyle =
-                            "border-[#D6D3CD] bg-white text-[#262626] focus:border-[#292524]";
-                          if (isTabRevealed) {
-                            inputStyle =
-                              "bg-[#FFFBEB] border-[#FDE68A] text-[#92400E] font-semibold";
-                          } else if (isWordCorrect) {
-                            inputStyle =
-                              "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D] font-semibold";
-                          } else if (
-                            isWordWrong ||
-                            (isChecked && !isWordCorrect)
-                          ) {
-                            inputStyle =
-                              "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]";
-                          }
-
-                          return (
-                            <span
-                              key={tok.index}
-                              className="inline-flex items-baseline"
-                            >
-                              {tok.punctuationBefore && (
-                                <span>{tok.punctuationBefore}</span>
-                              )}
-                              <input
-                                ref={(el) => {
-                                  inputRefs.current[key] = el;
-                                }}
-                                type="text"
-                                value={val}
-                                onFocus={() => setFocusedKey(key)}
-                                placeholder="___"
-                                onChange={(e) => {
-                                  const next = e.target.value;
-                                  setInputs((prev) => ({
-                                    ...prev,
-                                    [key]: next,
-                                  }));
-                                  if (isTabRevealed) {
-                                    setTabRevealed((prev) => {
-                                      const copy = { ...prev };
-                                      delete copy[key];
-                                      return copy;
-                                    });
-                                  }
-                                  if (
-                                    checkDictationWord(next, tok.cleanWord)
-                                  ) {
-                                    const allSolved = blanks.every((b) =>
-                                      b.index === tok.index
-                                        ? true
-                                        : checkDictationWord(
-                                            inputs[
-                                              `${sentence.id}:${b.index}`
-                                            ] ?? "",
-                                            b.cleanWord
-                                          )
-                                    );
-                                    if (
-                                      allSolved &&
-                                      !xpAwardedSentences[sentence.id]
-                                    ) {
-                                      setXpAwardedSentences((prev) => ({
-                                        ...prev,
-                                        [sentence.id]: true,
-                                      }));
-                                      addXP(15);
-                                    }
-                                  }
-                                }}
-                                onKeyDown={(e) => {
-                                  if (
-                                    (e.altKey &&
-                                      e.key.toLowerCase() === "r") ||
-                                    (e.ctrlKey && e.code === "Space")
-                                  ) {
-                                    e.preventDefault();
-                                    playSentence(
-                                      sentence.id,
-                                      sentence.textZh
-                                    );
-                                    return;
-                                  }
-                                  if (e.key === "Enter") {
-                                    e.preventDefault();
-                                    focusNextBlank(key, false);
-                                  } else if (e.key === "Tab") {
-                                    e.preventDefault();
-                                    if (e.shiftKey) {
-                                      focusNextBlank(key, true);
-                                    } else {
-                                      setInputs((prev) => ({
-                                        ...prev,
-                                        [key]: tok.cleanWord,
-                                      }));
-                                      setTabRevealed((prev) => ({
-                                        ...prev,
-                                        [key]: true,
-                                      }));
-                                      focusNextBlank(key, false);
-                                    }
-                                  }
-                                }}
-                                style={{ width: `${widthCh}ch` }}
-                                autoComplete="off"
-                                autoCorrect="off"
-                                spellCheck={false}
-                                aria-label={`Ô trống chữ Hán số ${tok.index + 1}`}
-                                className={`rounded-lg border px-2 py-0.5 text-center text-base transition-colors focus:outline-none ${inputStyle}`}
-                              />
-                              {tok.punctuationAfter && (
-                                <span>{tok.punctuationAfter}</span>
-                              )}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Footer: Pinyin & Translation toggles */}
-                    <div className="flex flex-wrap items-center justify-end gap-3 text-xs">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setShowSentencePinyin((prev) => ({
-                            ...prev,
-                            [sentence.id]: !showPy,
-                          }))
-                        }
-                        className="inline-flex cursor-pointer items-center gap-1 font-medium text-[#6B655E] hover:text-[#262626]"
-                      >
-                        <Languages className="h-3.5 w-3.5" />
-                        {showPy ? "Ẩn Pinyin" : "Hiện Pinyin"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setShowTranslations((prev) => ({
-                            ...prev,
-                            [sentence.id]: !showTrans,
-                          }))
-                        }
-                        className="inline-flex cursor-pointer items-center gap-1 font-medium text-[#6B655E] hover:text-[#262626]"
-                      >
-                        {showTrans ? (
-                          <EyeOff className="h-3.5 w-3.5" />
-                        ) : (
-                          <Eye className="h-3.5 w-3.5" />
+                          <InteractiveChineseText text={tok.cleanWord} />
+                        </span>
+                        {tok.punctuationAfter && (
+                          <span>{tok.punctuationAfter}</span>
                         )}
-                        {showTrans
-                          ? "Ẩn dịch tiếng Việt"
-                          : "Dịch tiếng Việt"}
-                      </button>
-                    </div>
+                      </span>
+                    );
+                  }
 
-                    {isRevealed && (
-                      <div className="rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-3.5 py-2.5 text-sm text-[#262626]">
-                        <span className="mr-2 text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
-                          Đáp án chữ Hán chuẩn:
-                        </span>
-                        <InteractiveChineseText
-                          text={sentence.textZh}
-                          pinyin={sentence.pinyin}
-                          showPinyin={showPy}
-                        />
-                      </div>
-                    )}
+                  const widthCh = Math.max(
+                    tok.cleanWord.length * 2 + 3,
+                    val.length * 2 + 3,
+                    6
+                  );
 
-                    {showTrans && (
-                      <div className="rounded-xl border border-[#E5E5E0] bg-white px-3.5 py-2.5 text-xs text-[#4A4540]">
-                        <span className="font-semibold text-[#737373]">
-                          Nghĩa tiếng Việt:{" "}
-                        </span>
-                        {sentence.translationVi}
-                      </div>
-                    )}
-                  </div>
+                  let inputStyle =
+                    "border-[#D6D3CD] bg-white text-[#262626] focus:border-brand";
+                  if (isTabRevealed) {
+                    inputStyle =
+                      "bg-[#FFFBEB] border-[#FDE68A] text-[#92400E] font-semibold";
+                  } else if (isWordCorrect) {
+                    inputStyle =
+                      "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D] font-semibold";
+                  } else if (isWordWrong || (isChecked && !isWordCorrect)) {
+                    inputStyle =
+                      "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]";
+                  }
+
+                  return (
+                    <span
+                      key={tok.index}
+                      className="inline-flex items-baseline"
+                    >
+                      {tok.punctuationBefore && (
+                        <span>{tok.punctuationBefore}</span>
+                      )}
+                      <input
+                        ref={(el) => {
+                          inputRefs.current[key] = el;
+                        }}
+                        type="text"
+                        value={val}
+                        onFocus={() => setFocusedKey(key)}
+                        placeholder="___"
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setInputs((prev) => ({ ...prev, [key]: next }));
+                          if (isTabRevealed) {
+                            setTabRevealed((prev) => {
+                              const copy = { ...prev };
+                              delete copy[key];
+                              return copy;
+                            });
+                          }
+                          if (checkDictationWord(next, tok.cleanWord)) {
+                            const allSolved = blanks.every((b) =>
+                              b.index === tok.index
+                                ? true
+                                : checkDictationWord(
+                                    inputs[`${sentence.id}:${b.index}`] ?? "",
+                                    b.cleanWord
+                                  )
+                            );
+                            if (allSolved && !xpAwardedSentences[sentence.id]) {
+                              setXpAwardedSentences((prev) => ({
+                                ...prev,
+                                [sentence.id]: true,
+                              }));
+                              addXP(15);
+                            }
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (
+                            (e.altKey && e.key.toLowerCase() === "r") ||
+                            (e.ctrlKey && e.code === "Space")
+                          ) {
+                            e.preventDefault();
+                            playSentence(sentence.id, sentence.textZh);
+                            return;
+                          }
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            const idxInSentence = currentBlankKeys.indexOf(key);
+                            if (
+                              idxInSentence !== -1 &&
+                              idxInSentence < currentBlankKeys.length - 1
+                            ) {
+                              const nextKey = currentBlankKeys[idxInSentence + 1];
+                              inputRefs.current[nextKey]?.focus();
+                            } else if (allCorrect && isChecked) {
+                              if (safeSentenceIndex < tokenizedSentences.length - 1) {
+                                goToSentence(safeSentenceIndex + 1);
+                              }
+                            } else {
+                              handleCheckSentence(sentence.id);
+                            }
+                          } else if (e.key === "Tab") {
+                            e.preventDefault();
+                            const idxInSentence = currentBlankKeys.indexOf(key);
+                            if (e.shiftKey) {
+                              if (idxInSentence > 0) {
+                                inputRefs.current[
+                                  currentBlankKeys[idxInSentence - 1]
+                                ]?.focus();
+                              }
+                            } else {
+                              setInputs((prev) => ({
+                                ...prev,
+                                [key]: tok.cleanWord,
+                              }));
+                              setTabRevealed((prev) => ({
+                                ...prev,
+                                [key]: true,
+                              }));
+                              if (
+                                idxInSentence !== -1 &&
+                                idxInSentence < currentBlankKeys.length - 1
+                              ) {
+                                inputRefs.current[
+                                  currentBlankKeys[idxInSentence + 1]
+                                ]?.focus();
+                              }
+                            }
+                          }
+                        }}
+                        style={{ width: `${widthCh}ch` }}
+                        autoComplete="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        aria-label={`Ô trống chữ Hán số ${tok.index + 1}`}
+                        className={`rounded-lg border px-2 py-0.5 text-center text-lg transition-colors focus:outline-none ${inputStyle}`}
+                      />
+                      {tok.punctuationAfter && (
+                        <span>{tok.punctuationAfter}</span>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+
+            {isRevealed && (
+              <div className="rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-4 py-3 text-base text-[#262626]">
+                <span className="mr-2 text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
+                  Đáp án chuẩn:
+                </span>
+                <InteractiveChineseText
+                  text={sentence.textZh}
+                  pinyin={sentence.pinyin}
+                  showPinyin={showPy}
+                />
+              </div>
+            )}
+
+            {showTrans && (
+              <div className="rounded-xl border border-[#E5E5E0] bg-white px-4 py-3 text-sm text-[#4A4540]">
+                <span className="font-semibold text-[#737373]">
+                  Nghĩa tiếng Việt:{" "}
+                </span>
+                {sentence.translationVi}
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="py-10 text-center text-sm text-[#737373]">
+            Chưa có bài nghe điền từ cho cấp độ này.
+          </p>
+        ))}
+
+      {/* ==================== MODE 2: SINGLE-QUESTION 4 TASK HSK ==================== */}
+      {mode === "tasks" &&
+        (currentTask ? (
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs font-semibold text-[#737373]">
+                {currentTask.title}
+              </p>
+              <h2 className="mt-1 text-base font-bold text-[#262626] sm:text-lg">
+                {currentTask.questionVi}
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+              {currentTask.options.map((opt) => {
+                const chosen = selectedAnswers[currentTask.id];
+                const isPicked = chosen === opt;
+                const isRightOpt = opt === currentTask.correctAnswer;
+                let style =
+                  "border-[#E5E5E0] bg-[#FAF9F7] text-[#262626] hover:border-brand";
+                if (chosen) {
+                  if (isRightOpt)
+                    style =
+                      "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D] font-semibold";
+                  else if (isPicked)
+                    style = "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]";
+                  else
+                    style =
+                      "border-[#E5E5E0] bg-white text-[#737373] opacity-65";
+                }
+                return (
+                  <motion.button
+                    key={opt}
+                    type="button"
+                    whileTap={!chosen ? { scale: 0.98 } : undefined}
+                    onClick={() => handleSelectOption(currentTask, opt)}
+                    className={`cursor-pointer rounded-xl border px-4 py-3 text-left text-sm transition-colors ${style}`}
+                  >
+                    {opt}
+                  </motion.button>
                 );
               })}
             </div>
-          )}
-        </div>
-      )}
 
-      {/* ==================== MODE 2: 4 TASK NGHE HIỂU CHUẨN HSK ==================== */}
-      {mode === "tasks" && (
-        <div className="space-y-4">
-          {/* 4 Task Tabs */}
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {taskTabs.map((tab) => {
-              const active = activeTab === tab.id;
-              const tabCount = levelFilteredTasks.filter((t, idx) => {
-                if (t.taskType !== tab.id) return false;
-                if (taskSubFilter === "all") return true;
-                return (
-                  getSubDifficulty(t, idx, levelFilteredTasks.length) ===
-                  taskSubFilter
-                );
-              }).length;
-
-              return (
-                <motion.button
-                  key={tab.id}
-                  type="button"
-                  whileTap={{ scale: 0.97 }}
-                  transition={TACTILE_SPRING}
-                  onClick={() => {
-                    stopSpeaking();
-                    setActiveTab(tab.id);
-                  }}
-                  className={`cursor-pointer rounded-xl border px-3 py-2.5 text-left transition-colors ${
-                    active
-                      ? "border-brand bg-brand-soft text-[#262626]"
-                      : "border-[#E5E5E0] bg-white text-[#4A4540] hover:border-brand"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-1.5">
-                    <div className={`text-xs font-semibold ${active ? "text-brand-active" : ""}`}>{tab.label}</div>
-                    <span
-                      className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
-                        active
-                          ? "bg-white text-brand-active"
-                          : "bg-[#F2F2F0] text-[#737373]"
-                      }`}
-                    >
-                      {tabCount} câu
-                    </span>
-                  </div>
-                  <div
-                    className={`mt-0.5 line-clamp-1 text-[11px] ${
-                      active ? "text-[#4A4540]" : "text-[#737373]"
-                    }`}
-                  >
-                    {tab.desc}
-                  </div>
-                </motion.button>
-              );
-            })}
-          </div>
-
-          {/* Task Cards */}
-          <div className="space-y-4">
-            {tasks.map((task, idx) => {
-              const chosen = selectedAnswers[task.id];
-              const isCorrect = chosen === task.correctAnswer;
-              const showTranscript = shownTranscripts[task.id] ?? false;
-
-              return (
-                <div
-                  key={task.id}
-                  className="space-y-4 rounded-2xl border border-[#E5E5E0] bg-white p-5 shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-md bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand-active">
-                        Câu {idx + 1} · {task.level}
-                      </span>
-                      <span className="rounded-md bg-[#F2F2F0] px-2 py-0.5 text-[11px] font-medium text-[#4A4540]">
-                        {task.subDifficulty === "advanced"
-                          ? "Nâng cao"
-                          : "Cơ bản"}
-                      </span>
-                      <h2 className="text-sm font-semibold text-[#262626]">
-                        {task.title}
-                      </h2>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <motion.button
-                        type="button"
-                        whileHover={{ y: -1 }}
-                        whileTap={{ scale: 0.95 }}
-                        transition={TACTILE_SPRING}
-                        onClick={() => playTaskAudio(task)}
-                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-brand px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs hover:bg-brand-hover"
-                      >
-                        <Play className="h-3.5 w-3.5" />
-                        {playingId === task.id
-                          ? "Đang phát..."
-                          : "Nghe audio (zh-CN)"}
-                      </motion.button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setShownTranscripts((prev) => ({
-                            ...prev,
-                            [task.id]: !showTranscript,
-                          }))
-                        }
-                        className="inline-flex cursor-pointer items-center gap-1 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-2.5 py-1.5 text-xs font-medium text-[#57534E] hover:border-[#6B655E]"
-                      >
-                        {showTranscript ? (
-                          <EyeOff className="h-3.5 w-3.5" />
-                        ) : (
-                          <Eye className="h-3.5 w-3.5" />
-                        )}
-                        Transcript
-                      </button>
-                    </div>
-                  </div>
-
-                  <p className="text-sm font-semibold text-[#262626]">
-                    {task.questionVi}
-                  </p>
-
-                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                    {task.options.map((opt) => {
-                      const isPicked = chosen === opt;
-                      const isRightOpt = opt === task.correctAnswer;
-                      let style =
-                        "border-[#E5E5E0] bg-[#FAF9F7] text-[#262626] hover:border-[#6B655E]";
-                      if (chosen) {
-                        if (isRightOpt)
-                          style =
-                            "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D] font-semibold";
-                        else if (isPicked)
-                          style =
-                            "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]";
-                        else
-                          style =
-                            "border-[#E5E5E0] bg-white text-[#737373] opacity-65";
-                      }
-                      return (
-                        <motion.button
-                          key={opt}
-                          type="button"
-                          whileTap={!chosen ? { scale: 0.98 } : undefined}
-                          onClick={() => handleSelectOption(task, opt)}
-                          className={`cursor-pointer rounded-xl border px-3.5 py-2.5 text-left text-xs transition-colors sm:text-sm ${style}`}
-                        >
-                          {opt}
-                        </motion.button>
-                      );
-                    })}
-                  </div>
-
-                  {chosen && (
-                    <div
-                      className={`flex items-start justify-between gap-2 rounded-xl border px-3.5 py-2.5 text-xs ${
-                        isCorrect
-                          ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D]"
-                          : "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]"
-                      }`}
-                    >
-                      <div className="flex items-start gap-2">
-                        {isCorrect ? (
-                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                        ) : (
-                          <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                        )}
-                        <span>{task.explanationVi}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setSelectedAnswers((prev) => {
-                            const copy = { ...prev };
-                            delete copy[task.id];
-                            return copy;
-                          })
-                        }
-                        className="inline-flex shrink-0 cursor-pointer items-center gap-1 font-medium underline"
-                      >
-                        <RotateCcw className="h-3 w-3" /> Làm lại
-                      </button>
-                    </div>
+            {selectedAnswers[currentTask.id] && (
+              <div
+                className={`flex items-start justify-between gap-2 rounded-xl border px-4 py-3 text-xs ${
+                  selectedAnswers[currentTask.id] === currentTask.correctAnswer
+                    ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D]"
+                    : "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]"
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  {selectedAnswers[currentTask.id] ===
+                  currentTask.correctAnswer ? (
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                  ) : (
+                    <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
                   )}
-
-                  {showTranscript && (
-                    <div className="space-y-2 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-4">
-                      <div className="text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
-                        Transcript chữ Hán · Nhấp vào bất kỳ từ nào để tra nghĩa &amp; Bộ thủ
-                      </div>
-                      <div className="text-base leading-relaxed text-[#262626]">
-                        <InteractiveChineseText
-                          text={task.audioZh}
-                          pinyin={task.pinyin}
-                          showPinyin={taskShowPinyin}
-                        />
-                      </div>
-                      {taskShowPinyin && task.pinyin && (
-                        <p className="font-mono text-xs text-[#6B655E]">
-                          {task.pinyin}
-                        </p>
-                      )}
-                      {task.transcriptVi && (
-                        <p className="border-t border-[#E5E5E0] pt-2 text-xs text-[#4A4540]">
-                          <strong className="text-[#737373]">Dịch nghĩa: </strong>
-                          {task.transcriptVi}
-                        </p>
-                      )}
-                    </div>
-                  )}
+                  <span>{currentTask.explanationVi}</span>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedAnswers((prev) => {
+                      const copy = { ...prev };
+                      delete copy[currentTask.id];
+                      return copy;
+                    })
+                  }
+                  className="inline-flex shrink-0 cursor-pointer items-center gap-1 font-medium underline"
+                >
+                  <RotateCcw className="h-3 w-3" /> Làm lại
+                </button>
+              </div>
+            )}
 
-      <ResourceBanner
-        resources={getResourcesByCategory(["listening"])}
-        heading="Giáo trình Luyện Nghe Cấp Tốc 1–3 + File nghe MP3 (Google Drive)"
-      />
-    </div>
+            {shownTranscripts[currentTask.id] && (
+              <div className="space-y-2 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-4">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
+                  Transcript chữ Hán · Nhấp vào từ để tra nghĩa
+                </div>
+                <div className="text-base leading-relaxed text-[#262626]">
+                  <InteractiveChineseText
+                    text={currentTask.audioZh}
+                    pinyin={currentTask.pinyin}
+                    showPinyin={taskShowPinyin}
+                  />
+                </div>
+                {taskShowPinyin && currentTask.pinyin && (
+                  <p className="font-mono text-xs text-[#6B655E]">
+                    {currentTask.pinyin}
+                  </p>
+                )}
+                {currentTask.transcriptVi && (
+                  <p className="border-t border-[#E5E5E0] pt-2 text-xs text-[#4A4540]">
+                    <strong className="text-[#737373]">Dịch nghĩa: </strong>
+                    {currentTask.transcriptVi}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="py-10 text-center text-sm text-[#737373]">
+            Chưa có câu hỏi cho Task &amp; cấp độ này.
+          </p>
+        ))}
+    </SkillFocusLayout>
   );
 }

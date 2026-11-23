@@ -394,6 +394,9 @@ export function StageTimeline({
                                   session.newWords && session.newWords.length > 0
                                     ? `${session.newWords.length} từ mới`
                                     : null,
+                                  session.exercises && session.exercises.length > 0
+                                    ? `${session.exercises.length} bài tập`
+                                    : null,
                                   session.dialogues && session.dialogues.length > 0
                                     ? `${session.dialogues.length} bài khóa`
                                     : null,

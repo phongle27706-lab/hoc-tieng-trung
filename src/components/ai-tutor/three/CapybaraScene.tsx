@@ -24,6 +24,7 @@ const CLAY_WARM = "#D98A4E";
 const MUZZLE_BROWN = "#7C4B34";
 const EAR_BROWN = "#8F5135";
 const DARK_INK = "#2B1B14";
+const EYE_DARK = "#1F140E";
 const YUZU_ORANGE = "#F59A23";
 const YUZU_LEAF = "#4F9A41";
 const YUZU_STEM = "#6C4A2F";
@@ -153,6 +154,10 @@ function Capybara({
   const mouthOpenMesh = useRef<THREE.Mesh>(null);
   const lidL = useRef<THREE.Mesh>(null);
   const lidR = useRef<THREE.Mesh>(null);
+  const browL = useRef<THREE.Mesh>(null);
+  const browR = useRef<THREE.Mesh>(null);
+  const eyeGroupL = useRef<THREE.Group>(null);
+  const eyeGroupR = useRef<THREE.Group>(null);
   const earL = useRef<THREE.Group>(null);
   const earR = useRef<THREE.Group>(null);
   const halo = useRef<THREE.Mesh>(null);
@@ -231,6 +236,26 @@ function Capybara({
     []
   );
 
+  const eyeMat = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: EYE_DARK,
+        roughness: 0.26,
+        metalness: 0.08,
+      }),
+    []
+  );
+
+  const browMat = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: "#4A2C1D",
+        roughness: 0.72,
+        metalness: 0.02,
+      }),
+    []
+  );
+
   const cheekMat = useMemo(
     () =>
       new THREE.MeshStandardMaterial({
@@ -282,6 +307,8 @@ function Capybara({
         earMat,
         earInnerMat,
         darkMat,
+        eyeMat,
+        browMat,
         cheekMat,
         yuzuMat,
         leafMat,
@@ -299,6 +326,8 @@ function Capybara({
       earMat,
       earInnerMat,
       darkMat,
+      eyeMat,
+      browMat,
       cheekMat,
       yuzuMat,
       leafMat,
@@ -320,27 +349,51 @@ function Capybara({
       body.current.scale.set(b, 1 + Math.sin(t * 1.65) * 0.012, b);
     }
 
-    // 4 attitude morph targets
-    let lid = 0.56; // super chill half-closed single-lid baseline
+    // 4 attitude morph targets (eyes, lids, eyebrows, head tilt)
+    let lid = 0.42; // super chill single-lid baseline (dark bean eyes clearly visible)
     let lidAsym = 0;
     let tiltZ = 0;
     let pitch = 0;
     let mouthTilt = 0;
+    let eyeTiltL = 0;
+    let eyeTiltR = 0;
+    let browTiltL = 0;
+    let browTiltR = 0;
+    let browYL = 0.082;
+    let browYR = 0.082;
 
     if (mood === "happy") {
-      lid = 0.34;
+      lid = 0.16; // bright cheerful eyes
       pitch = Math.sin(t * 4.0) * 0.08; // happy head nod
+      eyeTiltL = 0.08;
+      eyeTiltR = -0.08;
+      browTiltL = 0.14;
+      browTiltR = -0.14;
+      browYL = 0.098;
+      browYR = 0.098;
     } else if (mood === "mocking") {
-      lid = 0.62;
-      lidAsym = 0.24; // cheeky asymmetric squint
+      lid = 0.30;
+      lidAsym = 0.24; // cheeky asymmetric squint on left eye
       mouthTilt = 0.14;
       tiltZ = 0.09;
+      eyeTiltL = -0.12;
+      eyeTiltR = 0.06;
+      browTiltL = -0.18; // smug lowered left brow
+      browTiltR = 0.24; // raised skeptical right brow
+      browYL = 0.072;
+      browYR = 0.104;
     } else if (mood === "disdain") {
-      lid = 0.72; // heavy unimpressed half-lid
-      tiltZ = -0.18;
-      pitch = -0.09;
+      lid = 0.56; // heavy unimpressed half-lid while keeping dark eyes unmistakably visible
+      tiltZ = -0.16;
+      pitch = -0.08;
+      eyeTiltL = -0.14;
+      eyeTiltR = 0.14;
+      browTiltL = -0.24; // sharp inward V-furrow
+      browTiltR = 0.24;
+      browYL = 0.068;
+      browYR = 0.068;
     }
-    if (listening) lid = Math.min(lid, 0.32);
+    if (listening) lid = Math.min(lid, 0.22);
     if (analyzing) tiltZ += Math.sin(t * 1.7) * 0.07;
 
     // Natural random blink
@@ -354,11 +407,23 @@ function Capybara({
     if (lidL.current && lidR.current) {
       const l = Math.max(blinkAmt, Math.min(1, lid + lidAsym));
       const r = Math.max(blinkAmt, lid);
-      // Eyelid bar slides down over the horizontal chill eye
-      lidL.current.position.y = lerp(lidL.current.position.y, 0.055 - l * 0.048, blinkAmt ? 0.9 : d);
-      lidR.current.position.y = lerp(lidR.current.position.y, 0.055 - r * 0.048, blinkAmt ? 0.9 : d);
-      lidL.current.scale.y = lerp(lidL.current.scale.y, 0.45 + l * 0.95, blinkAmt ? 0.9 : d);
-      lidR.current.scale.y = lerp(lidR.current.scale.y, 0.45 + r * 0.95, blinkAmt ? 0.9 : d);
+      // Eyelid bar slides smoothly over the horizontal bean eye without ever burying it
+      lidL.current.position.y = lerp(lidL.current.position.y, 0.072 - l * 0.056, blinkAmt ? 0.9 : d);
+      lidR.current.position.y = lerp(lidR.current.position.y, 0.072 - r * 0.056, blinkAmt ? 0.9 : d);
+      lidL.current.scale.y = lerp(lidL.current.scale.y, 0.36 + l * 0.62, blinkAmt ? 0.9 : d);
+      lidR.current.scale.y = lerp(lidR.current.scale.y, 0.36 + r * 0.62, blinkAmt ? 0.9 : d);
+    }
+
+    if (eyeGroupL.current && eyeGroupR.current) {
+      eyeGroupL.current.rotation.z = lerp(eyeGroupL.current.rotation.z, eyeTiltL, d);
+      eyeGroupR.current.rotation.z = lerp(eyeGroupR.current.rotation.z, eyeTiltR, d);
+    }
+
+    if (browL.current && browR.current) {
+      browL.current.rotation.z = lerp(browL.current.rotation.z, browTiltL, d);
+      browR.current.rotation.z = lerp(browR.current.rotation.z, browTiltR, d);
+      browL.current.position.y = lerp(browL.current.position.y, browYL, d);
+      browR.current.position.y = lerp(browR.current.position.y, browYR, d);
     }
 
     // Smooth pointer-tracking head rotation + breathing bob
@@ -546,30 +611,41 @@ function Capybara({
             </mesh>
           ))}
 
-          {/* Super chill horizontal single-lid half-closed eyes */}
+          {/* Super chill horizontal single-lid bean eyes — positioned cleanly on FRONT SURFACE outside head mesh */}
           {[-1, 1].map((side) => (
             <group
               key={`eye-${side}`}
-              position={[side * 0.34, 0.12, 0.56]}
-              rotation={[0, side * 0.34, 0]}
+              ref={side < 0 ? eyeGroupL : eyeGroupR}
+              position={[side * 0.31, 0.15, 0.665]}
+              rotation={[0, side * 0.28, 0]}
             >
-              {/* Horizontal glossy-matte eye */}
-              <mesh scale={[1.38, 0.72, 0.45]} material={darkMat}>
-                <sphereGeometry args={[0.066, 20, 20]} />
+              {/* Dark brown-black (#1F140E) horizontal single-lid bean eye */}
+              <mesh scale={[1.45, 0.72, 0.54]} material={eyeMat}>
+                <sphereGeometry args={[0.07, 22, 22]} />
               </mesh>
-              {/* Subtle warm eye catchlight */}
-              <mesh position={[side * 0.018, 0.01, 0.028]}>
-                <sphereGeometry args={[0.012, 10, 10]} />
-                <meshBasicMaterial color="#FFF8EE" />
+              {/* Tiny crisp white highlight dot cleanly in front of eye */}
+              <mesh position={[side * 0.024, 0.015, 0.039]}>
+                <sphereGeometry args={[0.014, 12, 12]} />
+                <meshBasicMaterial color="#FFFFFF" toneMapped={false} />
               </mesh>
-              {/* Single-lid chill upper eyelid */}
+              {/* Single-lid upper eyelid sitting proud of the eye */}
               <mesh
                 ref={side < 0 ? lidL : lidR}
-                position={[0, 0.032, 0.012]}
-                scale={[1.55, 0.9, 0.6]}
-                material={clayWarmMat}
+                position={[0, 0.048, 0.018]}
+                scale={[1.52, 0.62, 0.62]}
+                material={furMat}
               >
-                <sphereGeometry args={[0.07, 20, 14]} />
+                <sphereGeometry args={[0.072, 20, 14]} />
+              </mesh>
+              {/* Expressive stylized clay eyebrow (horizontal rounded bar) */}
+              <mesh
+                ref={side < 0 ? browL : browR}
+                position={[0, 0.082, 0.028]}
+                rotation={[0, 0, 0]}
+                scale={[1.45, 0.28, 0.38]}
+                material={browMat}
+              >
+                <sphereGeometry args={[0.058, 16, 12]} />
               </mesh>
             </group>
           ))}

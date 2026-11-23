@@ -17,8 +17,14 @@ import {
 } from "lucide-react";
 import { InteractiveChineseText } from "@/components/dictionary/InteractiveChineseText";
 import { Avatar3D, type AvatarState } from "@/components/ai-tutor/Avatar3D";
-import { useLiveCall } from "@/hooks/useLiveCall";
-import { AI_PERSONA_LIST, AI_PERSONAS } from "@/lib/ai-tutor";
+import { useLiveCall, type SttLanguageMode } from "@/hooks/useLiveCall";
+import {
+  AI_LEVEL_LIMIT_LIST,
+  AI_LEVEL_LIMITS,
+  AI_PERSONA_LIST,
+  AI_PERSONAS,
+  type AILevelLimit,
+} from "@/lib/ai-tutor";
 import { speakBilingualText } from "@/lib/speech";
 import {
   getAvailableVoices,
@@ -30,26 +36,37 @@ import {
 import { VOICE_CALL_SPEEDS } from "@/lib/voice-call";
 import type { AIPersonaMode } from "@/types";
 
-export type CallLevel = "HSK1" | "HSK3" | "HSK5";
+export type CallLevel = AILevelLimit;
 
-const CALL_LEVELS: { id: CallLevel; label: string }[] = [
-  { id: "HSK1", label: "Sơ cấp (HSK 1–2)" },
-  { id: "HSK3", label: "Trung cấp (HSK 3–4)" },
-  { id: "HSK5", label: "Cao cấp (HSK 5–6+)" },
+const STT_MODES: { id: SttLanguageMode; label: string }[] = [
+  { id: "auto", label: "Tự động (VI ↔ ZH)" },
+  { id: "zh-CN", label: "Tiếng Trung (ZH)" },
+  { id: "vi-VN", label: "Tiếng Việt (VI)" },
 ];
 
 export interface LiveVoiceCallProps {
   persona: AIPersonaMode;
   onChangePersona: (persona: AIPersonaMode) => void;
+  hskLevel?: AILevelLimit;
+  onHskLevelChange?: (level: AILevelLimit) => void;
+  onOpenApiKeyModal?: () => void;
   initialLevel?: CallLevel;
 }
 
 export function LiveVoiceCall({
   persona,
   onChangePersona,
+  hskLevel,
+  onHskLevelChange,
+  onOpenApiKeyModal,
   initialLevel = "HSK1",
 }: LiveVoiceCallProps) {
-  const [level, setLevel] = useState<CallLevel>(initialLevel);
+  const [localLevel, setLocalLevel] = useState<AILevelLimit>(hskLevel ?? initialLevel);
+  const level: AILevelLimit = hskLevel ?? localLevel;
+  const setLevel = (next: AILevelLimit) => {
+    setLocalLevel(next);
+    onHskLevelChange?.(next);
+  };
   const [playViVoice, setPlayViVoice] = useState(true);
   const [speechRate, setSpeechRate] = useState<number>(0.95);
   const [showCaptions, setShowCaptions] = useState(true);
@@ -66,13 +83,17 @@ export function LiveVoiceCall({
     callState,
     isCallActive,
     isMuted,
+    sttMode,
+    setSttMode,
     listenLang,
-    setListenLang,
     liveTranscript,
     turns,
     lastAssistantTurn,
     lastUserTurn,
     errorMsg,
+    errorCode,
+    demoMode,
+    setDemoMode,
     noSpeechHint,
     speechSupported,
     startCall,
@@ -129,6 +150,7 @@ export function LiveVoiceCall({
   };
 
   const activePersona = AI_PERSONAS[persona] ?? AI_PERSONAS["binh-thuong"];
+  const activeLevelCfg = AI_LEVEL_LIMITS[level] ?? AI_LEVEL_LIMITS.HSK1;
   const avatarState: AvatarState = callState === "thinking" ? "analyzing" : callState;
   const turnCount = turns.filter((t) => t.role === "user").length;
 
@@ -144,9 +166,11 @@ export function LiveVoiceCall({
       case "listening":
         return {
           label:
-            listenLang === "vi-VN"
-              ? "Đang nghe tiếng Việt..."
-              : "Đang nghe tiếng Trung...",
+            sttMode === "auto"
+              ? `Đang nghe song ngữ (${listenLang === "vi-VN" ? "VI" : "ZH"})...`
+              : listenLang === "vi-VN"
+                ? "Đang nghe tiếng Việt..."
+                : "Đang nghe tiếng Trung...",
           dotClass: "bg-emerald-500 animate-ping",
         };
       case "thinking":
@@ -162,7 +186,7 @@ export function LiveVoiceCall({
           dotClass: "bg-[#A88B73]",
         };
     }
-  }, [callState, isCallActive, bargeInEnabled, listenLang]);
+  }, [callState, isCallActive, bargeInEnabled, listenLang, sttMode]);
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto bg-[#F7F3ED] px-3 py-4 sm:px-5">
@@ -190,45 +214,35 @@ export function LiveVoiceCall({
                 </span>
               </div>
               <span className="rounded-full border border-[#F26B5B]/30 bg-[#F26B5B]/12 px-2.5 py-1 text-[11px] font-semibold text-[#C84A3B]">
-                {level}
+                {activeLevelCfg.shortLabel}
               </span>
+              {demoMode && (
+                <span className="rounded-full border border-amber-400/40 bg-amber-50/90 px-2.5 py-1 text-[11px] font-semibold text-amber-800">
+                  Demo
+                </span>
+              )}
               <span className="hidden text-xs font-medium text-[#6F5848] sm:inline">
                 {statusMeta.label}
               </span>
             </div>
 
             <div className="flex items-center gap-2">
-              {/* 2-Way Bilingual VI <-> ZH STT Switch */}
-              <div
-                className="inline-flex items-center rounded-full border border-[#DEC8B2] bg-white/80 p-0.5 text-[11px] font-semibold shadow-xs backdrop-blur-md"
-                role="group"
-                aria-label="Ngôn ngữ bạn nói"
+              {/* Auto-detect Bilingual STT indicator (override available in Settings) */}
+              <button
+                type="button"
+                onClick={() => setShowSettings(true)}
+                title="Nhấn để tùy chỉnh ngôn ngữ nhận diện giọng nói trong Cài đặt"
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#DEC8B2] bg-white/80 px-3 py-1 text-[11px] font-semibold text-[#4A382D] shadow-xs backdrop-blur-md transition-colors hover:bg-white cursor-pointer"
               >
-                <button
-                  type="button"
-                  onClick={() => setListenLang("zh-CN")}
-                  className={`rounded-full px-2.5 py-1 transition-colors cursor-pointer ${
-                    listenLang === "zh-CN"
-                      ? "bg-[#2D221C] text-white"
-                      : "text-[#6F5848] hover:text-[#2D221C]"
-                  }`}
-                  title="Nói tiếng Trung (zh-CN)"
-                >
-                  Nói ZH
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setListenLang("vi-VN")}
-                  className={`rounded-full px-2.5 py-1 transition-colors cursor-pointer ${
-                    listenLang === "vi-VN"
-                      ? "bg-[#F26B5B] text-white"
-                      : "text-[#6F5848] hover:text-[#2D221C]"
-                  }`}
-                  title="Nói tiếng Việt (vi-VN)"
-                >
-                  Nói VI
-                </button>
-              </div>
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                <span>
+                  {sttMode === "auto"
+                    ? "Song ngữ tự động"
+                    : sttMode === "zh-CN"
+                      ? "Mic: ZH"
+                      : "Mic: VI"}
+                </span>
+              </button>
 
               {turnCount > 0 && (
                 <span className="hidden rounded-full border border-[#DEC8B2] bg-white/75 px-3 py-1 text-[11px] font-medium text-[#6F5848] backdrop-blur-md sm:inline">
@@ -259,18 +273,36 @@ export function LiveVoiceCall({
               />
             </div>
 
-            {/* Subtle inline hints */}
+            {/* Subtle inline hints & clear API/LLM error banner */}
             {(noSpeechHint || errorMsg) && (
-              <div className="mt-1 flex flex-wrap justify-center gap-1.5">
+              <div className="mt-1 flex max-w-xl flex-wrap items-center justify-center gap-2">
                 {noSpeechHint && (
                   <span className="rounded-full border border-amber-500/30 bg-amber-50/90 px-3 py-1 text-[11px] font-medium text-amber-900 shadow-xs backdrop-blur-sm">
                     {noSpeechHint}
                   </span>
                 )}
                 {errorMsg && (
-                  <span className="rounded-full border border-red-400/40 bg-red-50/95 px-3 py-1 text-[11px] font-medium text-red-700 shadow-xs backdrop-blur-sm">
-                    {errorMsg}
-                  </span>
+                  <div className="flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-red-400/50 bg-red-50/95 px-3.5 py-2 text-center text-xs font-medium text-red-700 shadow-sm backdrop-blur-sm">
+                    <span>{errorMsg}</span>
+                    {errorCode === "MISSING_API_KEY" && onOpenApiKeyModal && (
+                      <button
+                        type="button"
+                        onClick={onOpenApiKeyModal}
+                        className="rounded-full bg-[#2D221C] px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-[#4A382D] cursor-pointer"
+                      >
+                        Nhập API Key
+                      </button>
+                    )}
+                    {!demoMode && (errorCode === "MISSING_API_KEY" || errorCode === "LLM_ERROR") && (
+                      <button
+                        type="button"
+                        onClick={() => setDemoMode(true)}
+                        className="rounded-full border border-[#F26B5B]/40 bg-white px-2.5 py-0.5 text-[11px] font-semibold text-[#C84A3B] hover:bg-[#FFF3F0] cursor-pointer"
+                      >
+                        Bật chế độ Demo
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -344,11 +376,11 @@ export function LiveVoiceCall({
                 </div>
 
                 <div className="space-y-3">
-                  {/* Level */}
+                  {/* Level (100% synced with AITutorView header) */}
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-semibold text-[#5C473A]">Cấp độ</span>
                     <div className="flex flex-wrap gap-1">
-                      {CALL_LEVELS.map((lvl) => (
+                      {AI_LEVEL_LIMIT_LIST.map((lvl) => (
                         <button
                           key={lvl.id}
                           type="button"
@@ -360,6 +392,27 @@ export function LiveVoiceCall({
                           }`}
                         >
                           {lvl.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Optional STT Language Override */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold text-[#5C473A]">Ngôn ngữ Micro</span>
+                    <div className="flex flex-wrap gap-1">
+                      {STT_MODES.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => setSttMode(m.id)}
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer ${
+                            sttMode === m.id
+                              ? "bg-[#2D221C] text-white"
+                              : "bg-[#F5EBE0] text-[#5C473A] hover:bg-[#EAD8C6]"
+                          }`}
+                        >
+                          {m.label}
                         </button>
                       ))}
                     </div>
@@ -446,6 +499,17 @@ export function LiveVoiceCall({
                       }`}
                     >
                       Ngắt lời (Barge-in): {bargeInEnabled ? "Bật" : "Tắt"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDemoMode(!demoMode)}
+                      className={`rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer ${
+                        demoMode
+                          ? "bg-amber-600 text-white"
+                          : "bg-[#F5EBE0] text-[#5C473A]"
+                      }`}
+                    >
+                      Chế độ Demo: {demoMode ? "Bật" : "Tắt"}
                     </button>
                   </div>
 

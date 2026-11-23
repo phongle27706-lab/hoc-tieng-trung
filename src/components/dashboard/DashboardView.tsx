@@ -20,7 +20,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthContext";
-import { ALL_STUDY_SESSIONS } from "@/data/roadmap";
+import { BASE_STUDY_SESSIONS as ALL_STUDY_SESSIONS } from "@/data/roadmap/base";
 import {
   DEFAULT_USER_PROGRESS,
   getCompletedSessionIds,

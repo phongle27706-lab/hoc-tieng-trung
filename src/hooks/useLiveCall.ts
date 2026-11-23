@@ -3,17 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createChineseRecognizer,
+  detectSpokenLanguage,
   isSpeechRecognitionSupported,
-  isVietnameseText,
   speakBilingualText,
   stopSpeaking,
   type SpeechRecognitionInstance,
 } from "@/lib/speech";
+import type { AILevelLimit } from "@/lib/ai-tutor";
 import { getAITutorSettings, recordVoiceCallPractice } from "@/lib/storage";
 import type { AIPersonaMode } from "@/types";
 
 export type LiveCallState = "idle" | "listening" | "thinking" | "speaking";
 export type ListenLang = "zh-CN" | "vi-VN";
+export type SttLanguageMode = "auto" | "zh-CN" | "vi-VN";
+export type LiveCallErrorCode = "MISSING_API_KEY" | "LLM_ERROR" | "NETWORK_ERROR" | null;
 
 export interface LiveCallTurn {
   id: string;
@@ -28,11 +31,18 @@ export interface LiveCallTurn {
 
 export interface UseLiveCallOptions {
   persona: AIPersonaMode;
-  level: "HSK1" | "HSK3" | "HSK5";
+  level: AILevelLimit;
   playViVoice: boolean;
   speechRate: number;
   zhVoiceName?: string;
   viVoiceName?: string;
+}
+
+function levelToHskNumber(level: AILevelLimit): number | undefined {
+  if (level === "HSK1") return 1;
+  if (level === "HSK3") return 3;
+  if (level === "HSK5") return 5;
+  return undefined;
 }
 
 const POST_SPEECH_MIC_DELAY_MS = 320;
@@ -40,40 +50,76 @@ const SILENCE_TIMEOUT_MS = 1650;
 const NO_SPEECH_RETRY_DELAY_MS = 650;
 const MAX_NO_SPEECH_RETRIES = 3;
 
-function buildGreeting(persona: AIPersonaMode): {
+function buildGreeting(
+  persona: AIPersonaMode,
+  level: AILevelLimit
+): {
   contentZh: string;
   contentPinyin: string;
   contentVi: string;
   spokenText: string;
 } {
+  if (level === "HSK1") {
+    switch (persona) {
+      case "vui-ve":
+        return {
+          contentZh: "你好！你今天好吗？",
+          contentPinyin: "Nǐ hǎo! Nǐ jīntiān hǎo ma?",
+          contentVi: "Chào bạn nha! Hôm nay bạn muốn nói về chủ đề gì nè?",
+          spokenText: "Chào bạn nha! Hôm nay bạn muốn nói về chủ đề gì nè? 你好！你今天好吗？",
+        };
+      case "cuoi-nhao":
+        return {
+          contentZh: "嗨！你想聊什么？",
+          contentPinyin: "Hāi! Nǐ xiǎng liáo shénme?",
+          contentVi: "Ồ, gọi cho BaoBao rồi hả? Hôm nay muốn tán gẫu chủ đề gì nào?",
+          spokenText: "Ồ, gọi cho BaoBao rồi hả? Hôm nay muốn tán gẫu chủ đề gì nào? 嗨！你想聊什么？",
+        };
+      case "khinh-bi":
+        return {
+          contentZh: "哼，你想聊什么？",
+          contentPinyin: "Hēng, nǐ xiǎng liáo shénme?",
+          contentVi: "Hừ, tới rồi à? Nói đi, hôm nay muốn luyện chủ đề gì nào?",
+          spokenText: "Hừ, tới rồi à? Nói đi, hôm nay muốn luyện chủ đề gì nào? 哼，你想聊什么？",
+        };
+      default:
+        return {
+          contentZh: "你好！你想聊什么？",
+          contentPinyin: "Nǐ hǎo! Nǐ xiǎng liáo shénme?",
+          contentVi: "Chào bạn! Cứ nói tiếng Việt hoặc tiếng Trung thoải mái nhé. Hôm nay bạn muốn nói về chủ đề gì?",
+          spokenText: "Chào bạn! Cứ nói tiếng Việt hoặc tiếng Trung thoải mái nhé. Hôm nay bạn muốn nói về chủ đề gì? 你好！你想聊什么？",
+        };
+    }
+  }
+
   switch (persona) {
     case "vui-ve":
       return {
         contentZh: "你好呀！我是宝宝，今天你想聊点什么呢？",
         contentPinyin: "Nǐ hǎo ya! Wǒ shì Bǎobǎo, jīntiān nǐ xiǎng liáo diǎn shénme ne?",
         contentVi: "Chào bạn nha! Mình là BaoBao, hôm nay bạn muốn trò chuyện chủ đề gì nè?",
-        spokenText: "你好呀！Chào bạn nha, hôm nay bạn muốn nói chuyện gì với BaoBao nè?",
+        spokenText: "Chào bạn nha, hôm nay bạn muốn nói chuyện gì với BaoBao nè? 你好呀！",
       };
     case "cuoi-nhao":
       return {
         contentZh: "嗨呀！终于来找我聊天啦？今天想聊啥呢？",
         contentPinyin: "Hāi ya! Zhōngyú lái zhǎo wǒ liáotiān la? Jīntiān xiǎng liáo shá ne?",
         contentVi: "Ồ, cuối cùng cũng chịu gọi cho BaoBao rồi hả? Hôm nay định nói chuyện gì nào?",
-        spokenText: "嗨呀！Cuối cùng cũng gọi cho BaoBao rồi hả? Hôm nay định tán gẫu gì nào?",
+        spokenText: "Cuối cùng cũng gọi cho BaoBao rồi hả? Hôm nay định tán gẫu gì nào? 嗨呀！",
       };
     case "khinh-bi":
       return {
         contentZh: "哼，来了呀？说吧，今天想练什么呢？",
         contentPinyin: "Hēng, lái le ya? Shuō ba, jīntiān xiǎng liàn shénme ne?",
         contentVi: "Hừ, tới rồi à? Nói đi, hôm nay muốn luyện gì nào?",
-        spokenText: "哼，来了呀？Nói đi, hôm nay muốn luyện tiếng Trung chủ đề gì nào?",
+        spokenText: "Nói đi, hôm nay muốn luyện tiếng Trung chủ đề gì nào? 哼，来了呀？",
       };
     default:
       return {
         contentZh: "你好呀！我是宝宝，随便用中文或越南语聊吧，你今天过得怎么样？",
         contentPinyin: "Nǐ hǎo ya! Wǒ shì Bǎobǎo, suíbiàn yòng Zhōngwén huò Yuènányǔ liáo ba, nǐ jīntiān guò de zěnmeyàng?",
         contentVi: "Chào bạn! Mình là BaoBao, bạn cứ nói tiếng Trung hoặc tiếng Việt thoải mái nhé. Hôm nay của bạn thế nào?",
-        spokenText: "你好呀！Chào bạn, cứ nói tiếng Trung hoặc tiếng Việt thoải mái nhé. Hôm nay của bạn thế nào?",
+        spokenText: "Chào bạn, cứ nói tiếng Trung hoặc tiếng Việt thoải mái nhé. Hôm nay của bạn thế nào? 你好呀！",
       };
   }
 }
@@ -84,10 +130,13 @@ export function useLiveCall(options: UseLiveCallOptions) {
   const [callState, setCallState] = useState<LiveCallState>("idle");
   const [isCallActive, setIsCallActive] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [listenLang, setListenLangState] = useState<ListenLang>("zh-CN");
+  const [sttMode, setSttModeState] = useState<SttLanguageMode>("auto");
+  const [listenLang, setListenLangState] = useState<ListenLang>("vi-VN");
   const [liveTranscript, setLiveTranscript] = useState("");
   const [turns, setTurns] = useState<LiveCallTurn[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<LiveCallErrorCode>(null);
+  const [demoMode, setDemoModeState] = useState(false);
   const [noSpeechHint, setNoSpeechHint] = useState<string | null>(null);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [speakingPhase, setSpeakingPhase] = useState<"vi" | "zh" | null>(null);
@@ -99,7 +148,9 @@ export function useLiveCall(options: UseLiveCallOptions) {
   const speechRateRef = useRef(speechRate);
   const zhVoiceNameRef = useRef(zhVoiceName);
   const viVoiceNameRef = useRef(viVoiceName);
+  const sttModeRef = useRef<SttLanguageMode>(sttMode);
   const listenLangRef = useRef<ListenLang>(listenLang);
+  const demoModeRef = useRef(demoMode);
   const turnsRef = useRef<LiveCallTurn[]>(turns);
 
   const isCallActiveRef = useRef(false);
@@ -137,8 +188,14 @@ export function useLiveCall(options: UseLiveCallOptions) {
     viVoiceNameRef.current = viVoiceName;
   }, [viVoiceName]);
   useEffect(() => {
+    sttModeRef.current = sttMode;
+  }, [sttMode]);
+  useEffect(() => {
     listenLangRef.current = listenLang;
   }, [listenLang]);
+  useEffect(() => {
+    demoModeRef.current = demoMode;
+  }, [demoMode]);
   useEffect(() => {
     turnsRef.current = turns;
   }, [turns]);
@@ -230,21 +287,27 @@ export function useLiveCall(options: UseLiveCallOptions) {
       abortControllerRef.current?.abort();
       setNoSpeechHint(null);
       setErrorMsg(null);
+      setErrorCode(null);
       setCallState("thinking");
 
-      const spokeVietnamese =
-        listenLangRef.current === "vi-VN" || isVietnameseText(cleaned);
+      const detectedLang = detectSpokenLanguage(cleaned);
+      const spokeVietnamese = detectedLang === "vi-VN";
+      if (sttModeRef.current === "auto" && listenLangRef.current !== detectedLang) {
+        listenLangRef.current = detectedLang;
+        setListenLangState(detectedLang);
+      }
 
+      const priorTurns = turnsRef.current;
       const userTurn: LiveCallTurn = {
         id: `u-${Date.now()}`,
         role: "user",
         contentZh: cleaned,
         contentVi: cleaned,
         spokenText: cleaned,
-        lang: spokeVietnamese ? "vi-VN" : "zh-CN",
+        lang: detectedLang,
       };
 
-      const nextHistory = [...turnsRef.current, userTurn];
+      const nextHistory = [...priorTurns, userTurn];
       turnsRef.current = nextHistory;
       setTurns(nextHistory);
 
@@ -253,20 +316,27 @@ export function useLiveCall(options: UseLiveCallOptions) {
 
       try {
         const savedSettings = getAITutorSettings();
+        const hskNum = levelToHskNumber(levelRef.current);
+        const recentHistoryPayload = priorTurns.slice(-10).map((t) => ({
+          role: t.role,
+          contentZh: t.contentZh,
+          contentVi: t.contentVi,
+        }));
+
         const res = await fetch("/api/ai-tutor", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
           body: JSON.stringify({
             message: cleaned,
-            history: nextHistory.slice(-8).map((t) => ({
-              role: t.role,
-              contentZh: t.contentZh,
-              contentVi: t.contentVi,
-            })),
+            history: recentHistoryPayload,
+            conversationHistory: recentHistoryPayload,
             persona: personaRef.current,
             levelLimit: levelRef.current,
+            ...(hskNum !== undefined ? { hskLevel: hskNum } : {}),
             roleplayRole: "friend",
+            mode: "live-call",
+            allowFallback: demoModeRef.current,
             apiKey: savedSettings.apiKey || undefined,
             provider: savedSettings.provider,
           }),
@@ -274,28 +344,45 @@ export function useLiveCall(options: UseLiveCallOptions) {
 
         if (turnIdRef.current !== myTurn || !isCallActiveRef.current) return;
 
-        let contentZh = "嗯嗯，我听懂啦！你还可以再说说吗？";
-        let contentPinyin = "Ńg ńg, wǒ tīngdǒng la! Nǐ hái kěyǐ zài shuōshuo ma?";
-        let contentVi = "Ừm ừm, mình hiểu rồi nè! Bạn kể thêm đi?";
-        let correctionHint: string | undefined;
+        const data = (await res.json().catch(() => ({}))) as {
+          contentZh?: string;
+          contentPinyin?: string;
+          contentVi?: string;
+          correctionHint?: string;
+          error?: string;
+          code?: string;
+        };
 
-        if (res.ok) {
-          const data = (await res.json()) as {
-            contentZh?: string;
-            contentPinyin?: string;
-            contentVi?: string;
-            correctionHint?: string;
-          };
-          if (data.contentZh) contentZh = data.contentZh;
-          if (data.contentPinyin) contentPinyin = data.contentPinyin;
-          if (data.contentVi) contentVi = data.contentVi;
-          if (data.correctionHint) correctionHint = data.correctionHint;
+        if (!res.ok) {
+          const code: LiveCallErrorCode =
+            data.code === "MISSING_API_KEY"
+              ? "MISSING_API_KEY"
+              : "LLM_ERROR";
+          setErrorCode(code);
+          setErrorMsg(
+            data.error ||
+              "Không thể nhận phản hồi từ AI. Vui lòng kiểm tra API Key hoặc kết nối mạng."
+          );
+          setLiveTranscript("");
+          setCallState("idle");
+          return;
         }
 
-        // Build natural bilingual speech text:
-        // - If user spoke Vietnamese: speak BaoBao's Vietnamese reply (which includes the suggested Chinese sentence,
-        //   or append contentZh if contentVi doesn't already contain Hanzi) so BaoBao is NEVER silent in VI/bilingual!
-        // - If user spoke Chinese: speak contentZh naturally (plus brief Vietnamese hint if playViVoice is on & hint exists).
+        const contentZh = data.contentZh?.trim() || "";
+        const contentPinyin = data.contentPinyin?.trim() || "";
+        const contentVi = data.contentVi?.trim() || "";
+        const correctionHint = data.correctionHint?.trim() || undefined;
+
+        if (!contentZh && !contentVi) {
+          setErrorCode("LLM_ERROR");
+          setErrorMsg("AI trả về nội dung trống. Vui lòng thử lại.");
+          setLiveTranscript("");
+          setCallState("idle");
+          return;
+        }
+
+        // Build smooth bilingual speech text:
+        // Whole Vietnamese sentences + whole Chinese sentences (AudioQueue handles seamless vi-VN / zh-CN switching).
         let speechText = contentZh;
         if (spokeVietnamese) {
           const viHasHanzi = /\p{Script=Han}/u.test(contentVi);
@@ -312,7 +399,7 @@ export function useLiveCall(options: UseLiveCallOptions) {
           contentVi,
           correctionHint,
           spokenText: speechText,
-          lang: spokeVietnamese ? "vi-VN" : "zh-CN",
+          lang: detectedLang,
         };
 
         const updatedTurns = [...turnsRef.current, aiTurn];
@@ -326,10 +413,10 @@ export function useLiveCall(options: UseLiveCallOptions) {
         if ((err as { name?: string })?.name === "AbortError") return;
         if (turnIdRef.current !== myTurn || !isCallActiveRef.current) return;
 
-        const fallbackText = spokeVietnamese
-          ? "Mạng hơi chập chờn một chút, bạn nói lại cho BaoBao nghe nhé?"
-          : "抱歉呀，刚才信号有点卡，你能再说一遍吗？";
-        speakAndThenListen(fallbackText, myTurn);
+        setErrorCode("NETWORK_ERROR");
+        setErrorMsg("Mất kết nối mạng tới máy chủ AI. Vui lòng kiểm tra mạng và nhấn Mic để thử lại.");
+        setLiveTranscript("");
+        setCallState("idle");
       }
     },
     [abortRecognizer, speakAndThenListen]
@@ -600,9 +687,10 @@ export function useLiveCall(options: UseLiveCallOptions) {
     setIsMuted(false);
     setLiveTranscript("");
     setErrorMsg(null);
+    setErrorCode(null);
     setNoSpeechHint(null);
 
-    const greeting = buildGreeting(personaRef.current);
+    const greeting = buildGreeting(personaRef.current, levelRef.current);
     const greetTurn: LiveCallTurn = {
       id: `g-${Date.now()}`,
       role: "assistant",
@@ -665,6 +753,31 @@ export function useLiveCall(options: UseLiveCallOptions) {
     [openMic]
   );
 
+  const setSttMode = useCallback(
+    (mode: SttLanguageMode) => {
+      sttModeRef.current = mode;
+      setSttModeState(mode);
+      if (mode !== "auto") {
+        listenLangRef.current = mode;
+        setListenLangState(mode);
+      }
+      if (isCallActiveRef.current && callStateRef.current === "listening" && !isMutedRef.current) {
+        noSpeechRetriesRef.current = 0;
+        openMic();
+      }
+    },
+    [openMic]
+  );
+
+  const setDemoMode = useCallback((enabled: boolean) => {
+    demoModeRef.current = enabled;
+    setDemoModeState(enabled);
+    if (enabled) {
+      setErrorMsg(null);
+      setErrorCode(null);
+    }
+  }, []);
+
   const retryListening = useCallback(() => {
     if (!isCallActiveRef.current) {
       isCallActiveRef.current = true;
@@ -711,6 +824,8 @@ export function useLiveCall(options: UseLiveCallOptions) {
     callState,
     isCallActive,
     isMuted,
+    sttMode,
+    setSttMode,
     listenLang,
     setListenLang,
     liveTranscript,
@@ -718,6 +833,9 @@ export function useLiveCall(options: UseLiveCallOptions) {
     lastAssistantTurn,
     lastUserTurn,
     errorMsg,
+    errorCode,
+    demoMode,
+    setDemoMode,
     noSpeechHint,
     speechSupported,
     speakingPhase,
