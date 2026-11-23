@@ -16,7 +16,13 @@ const plusJakarta = Plus_Jakarta_Sans({
   display: "swap",
 });
 
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
+  "https://hoctiengtrung-ashy.vercel.app";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
+  alternates: { canonical: "/" },
   title: {
     default: "Quái Vật Tiếng Trung — Nền Tảng Tự Học Tiếng Trung Mức 0 – HSK 9 Cho Người Việt",
     template: "%s | Quái Vật Tiếng Trung",
@@ -36,6 +42,8 @@ export const metadata: Metadata = {
   ],
   openGraph: {
     type: "website",
+    url: "/",
+    images: [{ url: "/opengraph-image", width: 1200, height: 630 }],
     locale: "vi_VN",
     siteName: "Quái Vật Tiếng Trung",
     title: "Quái Vật Tiếng Trung — Nền Tảng Tự Học Tiếng Trung Mức 0 – HSK 9 Cho Người Việt",

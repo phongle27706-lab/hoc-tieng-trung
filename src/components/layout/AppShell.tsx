@@ -358,7 +358,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             href="/library"
             className={`flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
               pathname.startsWith("/library")
-                ? "border-[#262626] bg-[#262626] text-white"
+                ? "border-brand bg-brand-soft text-brand-active"
                 : "border-[#E5E5E0] bg-white text-[#4A4540] hover:bg-[#FAF9F7] hover:text-[#292524]"
             }`}
           >
@@ -386,7 +386,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               title="Tải xuống bản sao lưu JSON (quai-vat-tieng-trung-backup.json)"
             >
               <Download className="h-3 w-3 shrink-0" />
-              <span className="truncate">Sao lưu (JSON)</span>
+              <span className="whitespace-nowrap">Sao lưu</span>
             </button>
             <button
               type="button"
@@ -395,7 +395,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               title="Khôi phục tiến độ từ file JSON"
             >
               <Upload className="h-3 w-3 shrink-0" />
-              <span className="truncate">Khôi phục</span>
+              <span className="whitespace-nowrap">Khôi phục</span>
             </button>
             <input
               ref={fileInputRef}
@@ -429,9 +429,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="font-display text-xs font-bold">汉</span>
             </Link>
             <div className="flex min-w-0 items-baseline gap-2.5">
-              <h1 className="truncate font-display text-base font-bold tracking-tight text-[#262626]">
+              <p className="truncate font-display text-base font-bold tracking-tight text-[#262626]">
                 {pageMeta.title}
-              </h1>
+              </p>
               <span className="hidden truncate text-xs text-[#737373] sm:inline">
                 {pageMeta.subtitle}
               </span>
@@ -440,19 +440,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           {/* Compact Status Pills & Account Action */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center divide-x divide-[#E5E5E0] rounded-full border border-[#E5E5E0] bg-[#FAF9F7] text-xs font-semibold text-[#4A4540]">
+            <div className="flex items-center divide-x divide-amber-200 rounded-full border border-amber-200 bg-gami-soft text-xs font-semibold text-amber-900">
               <span
                 className="flex items-center gap-1 px-2.5 py-1"
                 title="Chuỗi ngày học liên tiếp"
               >
-                <Flame className="h-3.5 w-3.5 text-[#6B655E]" />
+                <Flame className="h-3.5 w-3.5 text-orange-500" fill="currentColor" />
                 <span>{progress.streakDays}</span>
               </span>
               <span
                 className="flex items-center gap-1 px-2.5 py-1"
                 title="Điểm kinh nghiệm"
               >
-                <Zap className="h-3.5 w-3.5 text-[#6B655E]" />
+                <Zap className="h-3.5 w-3.5 text-amber-500" fill="currentColor" />
                 <span>{progress.xp}</span>
                 <span className="hidden text-[11px] font-medium text-[#737373] sm:inline">
                   XP
@@ -461,7 +461,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
 
             <span
-              className="inline-flex h-7 items-center rounded-full bg-[#292524] px-2.5 text-xs font-bold text-white"
+              className="inline-flex h-7 items-center rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-2.5 text-xs font-bold text-white shadow-xs"
               title="Trình độ HSK hiện tại"
             >
               {progress.level === "HSK0" ? "Mức 0 (HSK0)" : progress.level}
@@ -479,7 +479,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ) : (
               <Link
                 href="/login"
-                className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-[#292524] px-3 text-xs font-medium text-white transition-colors hover:bg-[#3F3A36]"
+                className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-semibold text-white transition-colors hover:bg-brand-hover"
               >
                 <LogIn className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Đăng nhập</span>
@@ -489,9 +489,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Page Content */}
-        <main className="mx-auto w-full max-w-6xl min-w-0 flex-1 overflow-x-hidden px-4 py-6 pb-24 sm:px-6 md:pb-10 lg:px-8">
+        <main className="mx-auto w-full max-w-6xl min-w-0 flex-1 overflow-x-hidden px-4 py-6 pb-8 sm:px-6 lg:px-8">
           {children}
         </main>
+
+        {/* Footer */}
+        <footer className="mx-auto w-full max-w-6xl px-4 pb-24 pt-2 text-xs text-[#737373] sm:px-6 md:pb-6 lg:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#E5E5E0] pt-4">
+            <span>© {new Date().getFullYear()} Quái Vật Tiếng Trung</span>
+            <nav aria-label="Liên kết chân trang" className="flex items-center gap-4">
+              <Link href="/about" className="transition-colors hover:text-brand">
+                Giới thiệu
+              </Link>
+              <Link href="/contact" className="transition-colors hover:text-brand">
+                Liên hệ
+              </Link>
+              <Link href="/privacy" className="transition-colors hover:text-brand">
+                Chính sách bảo mật
+              </Link>
+            </nav>
+          </div>
+        </footer>
       </div>
 
       {/* Mobile Bottom Navigation Bar */}

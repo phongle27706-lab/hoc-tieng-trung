@@ -12,7 +12,7 @@ export interface ButtonProps
 
 const variantStyles: Record<ButtonVariant, string> = {
   primary:
-    "bg-[#6B655E] text-white hover:bg-[#4A4540] active:bg-[#292524] shadow-xs",
+    "bg-brand text-white hover:bg-brand-hover active:bg-brand-active shadow-xs",
   secondary:
     "bg-[#EAEAE6] text-[#262626] hover:bg-[#DFDFDA] active:bg-[#D4D4CE]",
   outline:
@@ -40,7 +40,7 @@ export function Button({
   return (
     <button
       type={type}
-      className={`inline-flex items-center justify-center font-medium transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#6B655E] focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer ${variantStyles[variant]} ${sizeStyles[size]} ${fullWidth ? "w-full" : ""} ${className}`}
+      className={`inline-flex items-center justify-center font-medium transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer ${variantStyles[variant]} ${sizeStyles[size]} ${fullWidth ? "w-full" : ""} ${className}`}
       {...props}
     />
   );

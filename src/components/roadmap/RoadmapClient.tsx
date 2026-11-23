@@ -224,8 +224,8 @@ export function RoadmapClient() {
                 onClick={() => setLevelFilter(pill.id)}
                 className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
                   active
-                    ? "bg-[#292524] text-white"
-                    : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-[#6B655E] hover:bg-[#F2F2F0]"
+                    ? "bg-brand-soft text-brand-active ring-1 ring-brand"
+                    : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-brand hover:bg-[#F2F2F0]"
                 }`}
               >
                 {pill.label}
@@ -242,8 +242,8 @@ export function RoadmapClient() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm bài học, chữ Hán, Pinyin, bộ thủ, ngữ pháp..."
-              className="w-full rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] py-2 pl-9 pr-8 text-sm text-[#262626] placeholder:text-[#737373] transition-colors focus:border-[#6B655E] focus:bg-white focus:outline-none"
+              placeholder="Tìm bài học, chữ Hán, Pinyin..."
+              className="w-full rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] py-2 pl-9 pr-8 text-sm text-[#262626] placeholder:text-[#737373] transition-colors focus:border-brand focus:bg-white focus:outline-none"
             />
             {searchQuery && (
               <button
@@ -298,7 +298,7 @@ export function RoadmapClient() {
                     onClick={() => setCompletionFilter(opt.id)}
                     className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
                       active
-                        ? "bg-[#292524] text-white"
+                        ? "bg-white text-brand-active ring-1 ring-brand shadow-xs"
                         : "text-[#737373] hover:text-[#262626]"
                     }`}
                   >
@@ -394,7 +394,7 @@ export function RoadmapClient() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="rounded-xl bg-[#292524] px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-[#4A4540] cursor-pointer"
+                  className="rounded-xl bg-brand px-5 py-2 text-sm font-semibold text-white shadow-xs transition-colors hover:bg-brand-hover cursor-pointer"
                 >
                   Xong
                 </button>

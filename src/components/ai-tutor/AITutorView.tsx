@@ -10,8 +10,8 @@ import {
   MicOff,
   PhoneCall,
   Send,
+  Settings,
   ShoppingBag,
-  SlidersHorizontal,
   Sparkles,
   Trash2,
   UserCheck,
@@ -47,6 +47,7 @@ import {
   subscribeVoicesChanged,
   TTS_MAX_RATE,
   TTS_MIN_RATE,
+  getFriendlyVoiceLabel,
 } from "@/lib/tts-voice";
 import {
   clearAIChatHistory,
@@ -89,6 +90,8 @@ export function AITutorView() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [zhVoices, setZhVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedZhVoice, setSelectedZhVoice] = useState<string>("");
+  const [viVoices, setViVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedViVoice, setSelectedViVoice] = useState<string>("");
   const [hydrated, setHydrated] = useState(false);
   const [tutorMode, setTutorMode] = useState<"chat" | "call">("chat");
 
@@ -109,9 +112,12 @@ export function AITutorView() {
     setMessages(getAIChatHistory());
     setSpeechSupported(isSpeechRecognitionSupported());
     setSelectedZhVoice(getPreferredVoiceName("zh") ?? "");
+    setSelectedViVoice(getPreferredVoiceName("vi") ?? "");
     setZhVoices(getAvailableVoices("zh"));
+    setViVoices(getAvailableVoices("vi"));
     const unsubscribeVoices = subscribeVoicesChanged(() => {
       setZhVoices(getAvailableVoices("zh"));
+      setViVoices(getAvailableVoices("vi"));
     });
     setHydrated(true);
 
@@ -398,7 +404,7 @@ export function AITutorView() {
               }}
               className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
                 tutorMode === "chat"
-                  ? "bg-[#292524] text-[#FFFFFF]"
+                  ? "bg-white text-brand-active ring-1 ring-brand shadow-xs"
                   : "text-[#737373] hover:text-[#262626]"
               }`}
             >
@@ -418,8 +424,8 @@ export function AITutorView() {
               }}
               className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
                 tutorMode === "call"
-                  ? "bg-[#6B655E] text-[#FFFFFF]"
-                  : "text-[#4A4540] hover:bg-[#F2F2F0] hover:text-[#262626]"
+                  ? "bg-brand-active text-white ring-2 ring-brand-ring shadow-xs"
+                  : "bg-brand text-white hover:bg-brand-hover shadow-xs"
               }`}
             >
               <PhoneCall className="h-3.5 w-3.5" />
@@ -427,21 +433,23 @@ export function AITutorView() {
             </button>
           </div>
 
-          {/* Right: Tùy chỉnh + API Key + Clear */}
+          {/* Right: ⚙️ Cài đặt + API Key + Clear */}
           <div className="flex items-center gap-1.5">
             {tutorMode === "chat" && (
               <button
                 type="button"
                 onClick={() => setIsSettingsOpen((prev) => !prev)}
                 aria-expanded={isSettingsOpen}
+                aria-label="Cài đặt gia sư & giọng đọc"
+                title="Cài đặt: tốc độ, giọng đọc, Pinyin, thái độ"
                 className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
                   isSettingsOpen
-                    ? "border-[#292524] bg-[#292524] text-[#FFFFFF]"
+                    ? "border-brand bg-brand-soft text-brand-active"
                     : "border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
                 }`}
               >
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                <span>Tùy chỉnh</span>
+                <Settings className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Cài đặt</span>
               </button>
             )}
 
@@ -455,7 +463,7 @@ export function AITutorView() {
               <span className="hidden sm:inline">API Key</span>
               {settings.apiKey && (
                 <span
-                  className="h-2 w-2 rounded-full bg-[#292524]"
+                  className="h-2 w-2 rounded-full bg-brand"
                   title="Đã cấu hình API Key"
                 />
               )}
@@ -516,7 +524,7 @@ export function AITutorView() {
                           onClick={() => setLevelLimit(lvl.id)}
                           className={`rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
                             active
-                              ? "bg-[#292524] text-[#FFFFFF]"
+                              ? "bg-white text-brand-active ring-1 ring-brand shadow-xs"
                               : "border border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
                           }`}
                         >
@@ -543,7 +551,7 @@ export function AITutorView() {
                           onClick={() => setRoleplayRole(role.id)}
                           className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
                             active
-                              ? "bg-[#4A4540] text-[#FFFFFF]"
+                              ? "bg-white text-brand-active ring-1 ring-brand shadow-xs"
                               : "border border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
                           }`}
                         >
@@ -571,7 +579,7 @@ export function AITutorView() {
                         onClick={() => handleSelectPersona(p.id)}
                         className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
                           isSelected
-                            ? "bg-[#292524] text-[#FFFFFF]"
+                            ? "bg-white text-brand-active ring-1 ring-brand shadow-xs"
                             : "border border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
                         }`}
                       >
@@ -605,7 +613,7 @@ export function AITutorView() {
                     step={0.05}
                     value={ttsRate}
                     onChange={(e) => setTtsRate(clampTTSRate(Number(e.target.value)))}
-                    className="w-full accent-[#292524] cursor-pointer"
+                    className="w-full accent-brand cursor-pointer"
                   />
                   <div className="flex justify-between text-[11px] text-[#737373]">
                     <span>0.7x (Chậm)</span>
@@ -630,12 +638,38 @@ export function AITutorView() {
                         setSelectedZhVoice(val);
                         setPreferredVoiceName("zh", val || undefined);
                       }}
-                      className="w-full rounded-lg border border-[#E5E5E0] bg-[#FFFFFF] px-2.5 py-1.5 text-xs text-[#262626] focus:border-[#292524] focus:outline-none"
+                      className="w-full rounded-lg border border-[#E5E5E0] bg-[#FFFFFF] px-2.5 py-1.5 text-xs text-[#262626] focus:border-brand focus:outline-none"
                     >
                       <option value="">Tự động chọn giọng tự nhiên nhất</option>
                       {zhVoices.map((v) => (
                         <option key={v.name} value={v.name}>
-                          {v.name} ({v.lang})
+                          {getFriendlyVoiceLabel(v)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="vi-voice-select"
+                      className="block text-xs font-semibold text-[#4A4540]"
+                    >
+                      Giọng đọc tiếng Việt (vi-VN)
+                    </label>
+                    <select
+                      id="vi-voice-select"
+                      value={selectedViVoice}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSelectedViVoice(val);
+                        setPreferredVoiceName("vi", val || undefined);
+                      }}
+                      className="w-full rounded-lg border border-[#E5E5E0] bg-[#FFFFFF] px-2.5 py-1.5 text-xs text-[#262626] focus:border-brand focus:outline-none"
+                    >
+                      <option value="">Tự động chọn giọng Việt chuẩn</option>
+                      {viVoices.map((v) => (
+                        <option key={v.name} value={v.name}>
+                          {getFriendlyVoiceLabel(v)}
                         </option>
                       ))}
                     </select>
@@ -644,40 +678,49 @@ export function AITutorView() {
                   <div className="flex flex-wrap items-center gap-2 pt-1">
                     <button
                       type="button"
+                      role="switch"
+                      aria-checked={autoRead}
                       onClick={() => {
                         setAutoRead((prev) => {
                           if (prev) stopSpeaking();
                           return !prev;
                         });
                       }}
-                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
                         autoRead
-                          ? "bg-[#292524] text-[#FFFFFF]"
-                          : "border border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                          : "border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
                       }`}
                     >
+                      <span className={`h-2 w-2 rounded-full ${autoRead ? "bg-emerald-500" : "bg-[#D6D3CD]"}`} />
                       Tự động đọc: {autoRead ? "Bật" : "Tắt"}
                     </button>
                     <button
                       type="button"
+                      role="switch"
+                      aria-checked={defaultShowPinyin}
                       onClick={() => setDefaultShowPinyin((prev) => !prev)}
-                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
                         defaultShowPinyin
-                          ? "bg-[#292524] text-[#FFFFFF]"
-                          : "border border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                          : "border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
                       }`}
                     >
+                      <span className={`h-2 w-2 rounded-full ${defaultShowPinyin ? "bg-emerald-500" : "bg-[#D6D3CD]"}`} />
                       Hiện Pinyin: {defaultShowPinyin ? "Bật" : "Tắt"}
                     </button>
                     <button
                       type="button"
+                      role="switch"
+                      aria-checked={defaultShowVi}
                       onClick={() => setDefaultShowVi((prev) => !prev)}
-                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
                         defaultShowVi
-                          ? "bg-[#292524] text-[#FFFFFF]"
-                          : "border border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                          : "border-[#E5E5E0] bg-[#FFFFFF] text-[#4A4540] hover:bg-[#F2F2F0]"
                       }`}
                     >
+                      <span className={`h-2 w-2 rounded-full ${defaultShowVi ? "bg-emerald-500" : "bg-[#D6D3CD]"}`} />
                       Hiện dịch Việt: {defaultShowVi ? "Bật" : "Tắt"}
                     </button>
                   </div>
@@ -735,7 +778,7 @@ export function AITutorView() {
                             : "border-[#E5E5E0] bg-[#FFFFFF] hover:border-[#6B655E]"
                         }`}
                       >
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#F2F2F0] text-[#4A4540] transition-colors group-hover:bg-[#292524] group-hover:text-[#FFFFFF]">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#F2F2F0] text-[#4A4540] transition-colors group-hover:bg-brand group-hover:text-[#FFFFFF]">
                           <Icon className="h-4 w-4" />
                         </div>
                         <div className="min-w-0">
@@ -886,7 +929,7 @@ export function AITutorView() {
                 size="sm"
                 onClick={() => void sendMessage(input)}
                 disabled={!input.trim() || isLoading}
-                className="h-11 w-11 shrink-0 rounded-xl bg-[#292524] p-0 text-[#FFFFFF] hover:bg-[#4A4540]"
+                className="h-11 w-11 shrink-0 rounded-xl bg-brand p-0 text-white hover:bg-brand-hover"
                 aria-label="Gửi tin nhắn"
               >
                 <Send className="h-4 w-4" />

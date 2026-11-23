@@ -1,0 +1,22 @@
+﻿# Chan AI doc thu vien & file build de tiet kiem token
+node_modules/
+.next/
+dist/
+out/
+build/
+coverage/
+
+# Chan file lock cuc dai
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Chan file tai nguyen tinh nang & lich su git
+.git/
+public/audio/
+public/images/
+*.mp3
+*.wav
+*.png
+*.jpg
+*.svg

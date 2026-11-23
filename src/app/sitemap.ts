@@ -24,6 +24,9 @@ const PUBLIC_ROUTES: Array<{
   { path: "/speaking", priority: 0.85, changeFrequency: "weekly" },
   { path: "/reading", priority: 0.85, changeFrequency: "weekly" },
   { path: "/writing", priority: 0.85, changeFrequency: "weekly" },
+  { path: "/about", priority: 0.6, changeFrequency: "monthly" },
+  { path: "/contact", priority: 0.5, changeFrequency: "monthly" },
+  { path: "/privacy", priority: 0.4, changeFrequency: "yearly" },
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {

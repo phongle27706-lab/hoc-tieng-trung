@@ -332,7 +332,7 @@ export function PersonalizationPanel({
                 aria-pressed={isSelected}
                 className={`w-full rounded-2xl border p-4 text-left transition-all cursor-pointer ${
                   isSelected
-                    ? "border-[#292524] bg-[#292524] text-white shadow-sm"
+                    ? "border-brand bg-brand-soft text-brand-active shadow-xs"
                     : "border-[#E5E5E0] bg-[#FAF9F7] text-[#262626] hover:border-[#6B655E]"
                 }`}
               >
@@ -374,7 +374,7 @@ export function PersonalizationPanel({
                 aria-pressed={isSelected}
                 className={`flex flex-col justify-between rounded-xl border p-2.5 text-left transition-colors cursor-pointer ${
                   isSelected
-                    ? "border-[#292524] bg-[#F2F2F0]"
+                    ? "border-brand bg-brand-soft"
                     : "border-[#E5E5E0] bg-white hover:border-[#6B655E]"
                 }`}
               >
@@ -412,14 +412,14 @@ export function PersonalizationPanel({
                 aria-pressed={isSelected}
                 className={`flex items-start gap-3 rounded-xl border p-3.5 text-left transition-colors cursor-pointer ${
                   isSelected
-                    ? "border-[#292524] bg-[#F2F2F0]"
+                    ? "border-brand bg-brand-soft"
                     : "border-[#E5E5E0] bg-white hover:border-[#6B655E]"
                 }`}
               >
                 <div
                   className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
                     isSelected
-                      ? "bg-[#292524] text-white"
+                      ? "bg-brand text-white"
                       : "bg-[#F2F2F0] text-[#6B655E]"
                   }`}
                 >
@@ -469,7 +469,7 @@ export function PersonalizationPanel({
                 aria-pressed={isSelected}
                 className={`flex flex-col items-center justify-center rounded-xl border px-3 py-2.5 text-center transition-colors cursor-pointer ${
                   isSelected
-                    ? "border-[#292524] bg-[#292524] text-white"
+                    ? "border-brand bg-brand-soft text-brand-active"
                     : "border-[#E5E5E0] bg-white text-[#262626] hover:border-[#6B655E]"
                 }`}
               >

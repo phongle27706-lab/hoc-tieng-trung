@@ -179,7 +179,7 @@ export function StageTimeline({
           <button
             type="button"
             onClick={onClearFilters}
-            className="mt-4 inline-flex items-center rounded-xl bg-[#292524] px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#4A4540] cursor-pointer"
+            className="mt-4 inline-flex items-center rounded-xl bg-brand px-4 py-2 text-xs font-semibold text-white shadow-xs transition-colors hover:bg-brand-hover cursor-pointer"
           >
             Xóa bộ lọc
           </button>
@@ -328,12 +328,14 @@ export function StageTimeline({
                           <div className="min-w-0 flex-1">
                             <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
                               {session.lessonNumber !== undefined && (
-                                <span className="inline-flex shrink-0 items-center rounded-full bg-[#292524] px-2 py-0.5 text-[10px] font-bold text-white">
+                                <span className="inline-flex shrink-0 items-center rounded-full bg-brand-soft px-2 py-0.5 text-[10px] font-bold text-brand-active">
                                   Bài {session.lessonNumber}
                                 </span>
                               )}
                               <p className="min-w-0 truncate text-sm font-medium text-[#262626]">
-                                {session.title}
+                                {session.lessonNumber !== undefined
+                                  ? session.title.replace(/^Bài\s*\d+\s*[:：\-–—]\s*/i, "")
+                                  : session.title}
                               </p>
                               <span className="hidden items-center gap-1 rounded-full border border-[#E5E5E0] bg-[#FAF9F7] px-2 py-0.5 text-[10px] font-semibold text-[#4A4540] sm:inline-flex">
                                 <SkillIcon className="h-3 w-3 text-[#6B655E]" />
@@ -367,12 +369,12 @@ export function StageTimeline({
                         {/* Single Action Button */}
                         <Link
                           href={`/study/${session.id}`}
-                          className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors sm:px-3.5 ${
+                          className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors sm:px-3.5 ${
                             isCompleted
                               ? "border border-[#E5E5E0] bg-white text-[#262626] hover:bg-[#F2F2F0]"
                               : isCheckpoint
-                              ? "bg-[#292524] text-white hover:bg-[#4A4540]"
-                              : "bg-[#6B655E] text-white hover:bg-[#4A4540]"
+                              ? "bg-brand-active text-white shadow-xs hover:bg-brand"
+                              : "bg-brand text-white shadow-xs hover:bg-brand-hover"
                           }`}
                         >
                           Vào học

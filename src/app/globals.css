@@ -9,6 +9,13 @@
   --color-taupe-primary: #6B655E;
   --color-taupe-hover: #4A4540;
   --color-charcoal: #292524;
+  --color-brand: #F26B4F;
+  --color-brand-hover: #E0553A;
+  --color-brand-active: #C8452C;
+  --color-brand-soft: #FFF1EC;
+  --color-brand-ring: #F9B4A4;
+  --color-gami: #F59E0B;
+  --color-gami-soft: #FFF7E6;
 
   --font-sans: var(--font-inter), "Noto Sans SC", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-plus-jakarta), var(--font-inter), "Noto Sans SC", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
@@ -20,8 +27,11 @@
   --border-card: #E5E5E0;
   --text-primary: #262626;
   --text-secondary: #737373;
-  --primary: #6B655E;
-  --primary-hover: #4A4540;
+  --primary: #F26B4F;
+  --primary-hover: #E0553A;
+  --brand: #F26B4F;
+  --brand-hover: #E0553A;
+  --brand-soft: #FFF1EC;
   --charcoal: #292524;
   --success-text: #15803D;
   --success-bg: #F0FDF4;

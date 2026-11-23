@@ -17,7 +17,7 @@ export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 
 const variantStyles: Record<BadgeVariant, string> = {
   default: "bg-[#EFEFEA] text-[#4A4540]",
-  accent: "bg-[#292524] text-white",
+  accent: "bg-brand-soft text-brand-active",
   tone1: "bg-[#EFF6FF] text-[#1D4ED8]",
   tone2: "bg-[#ECFDF5] text-[#047857]",
   tone3: "bg-[#FEFCE8] text-[#A16207]",

@@ -430,6 +430,90 @@ export function useLiveCall(options: UseLiveCallOptions) {
     speakPromptAndListenRef.current = speakPromptAndListen;
   }, [speakPromptAndListen]);
 
+  // ── Barge-in VAD: detect user speech while BaoBao is talking ──
+  const vadRef = useRef<{
+    stream: MediaStream;
+    ctx: AudioContext;
+    analyser: AnalyserNode;
+    raf: number;
+  } | null>(null);
+  const micLevelRef = useRef(0);
+  const [bargeInEnabled, setBargeInEnabled] = useState(true);
+  const bargeInEnabledRef = useRef(true);
+  useEffect(() => {
+    bargeInEnabledRef.current = bargeInEnabled;
+  }, [bargeInEnabled]);
+
+  const stopVad = useCallback(() => {
+    const v = vadRef.current;
+    if (!v) return;
+    vadRef.current = null;
+    cancelAnimationFrame(v.raf);
+    v.stream.getTracks().forEach((tr) => tr.stop());
+    v.ctx.close().catch(() => {});
+    micLevelRef.current = 0;
+  }, []);
+
+  const startVad = useCallback(async () => {
+    if (vadRef.current || typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      if (!isCallActiveRef.current) {
+        stream.getTracks().forEach((tr) => tr.stop());
+        return;
+      }
+      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const ctx = new Ctx();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      const buf = new Uint8Array(analyser.fftSize);
+      let loudSince = 0;
+      const tick = () => {
+        const v = vadRef.current;
+        if (!v) return;
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const x = (buf[i] - 128) / 128;
+          sum += x * x;
+        }
+        const rms = Math.sqrt(sum / buf.length);
+        micLevelRef.current = rms;
+        const now = performance.now();
+        if (
+          bargeInEnabledRef.current &&
+          callStateRef.current === "speaking" &&
+          !isMutedRef.current &&
+          rms > 0.09
+        ) {
+          if (!loudSince) loudSince = now;
+          if (now - loudSince > 280) {
+            loudSince = 0;
+            const list = levelPromptsRef.current;
+            const prompt = list[promptIndexRef.current % Math.max(1, list.length)];
+            if (prompt) {
+              stopSpeaking();
+              setSpeakingPhase(null);
+              noSpeechRetriesRef.current = 0;
+              openMicForPromptRef.current(prompt);
+            }
+          }
+        } else {
+          loudSince = 0;
+        }
+        v.raf = requestAnimationFrame(tick);
+      };
+      vadRef.current = { stream, ctx, analyser, raf: requestAnimationFrame(tick) };
+    } catch {
+      // Mic denied: barge-in unavailable, hands-free loop still works
+    }
+  }, []);
+
+  const getMicLevel = useCallback(() => micLevelRef.current, []);
+
   useEffect(() => {
     setSpeechSupported(isSpeechRecognitionSupported());
     return () => {
@@ -438,8 +522,9 @@ export function useLiveCall(options: UseLiveCallOptions) {
       clearAllTimers();
       abortRecognizer();
       stopSpeaking();
+      stopVad();
     };
-  }, [abortRecognizer, clearAllTimers]);
+  }, [abortRecognizer, clearAllTimers, stopVad]);
 
   const startCall = useCallback(() => {
     const list = levelPromptsRef.current;
@@ -462,7 +547,8 @@ export function useLiveCall(options: UseLiveCallOptions) {
     setNoSpeechHint(null);
 
     speakPromptAndListen(prompt);
-  }, [abortRecognizer, clearAllTimers, speakPromptAndListen]);
+    void startVad();
+  }, [abortRecognizer, clearAllTimers, speakPromptAndListen, startVad]);
 
   const endCall = useCallback(() => {
     isCallActiveRef.current = false;
@@ -470,12 +556,13 @@ export function useLiveCall(options: UseLiveCallOptions) {
     clearAllTimers();
     abortRecognizer();
     stopSpeaking();
+    stopVad();
 
     setIsCallActive(false);
     setCallState("idle");
     setSpeakingPhase(null);
     setNoSpeechHint(null);
-  }, [abortRecognizer, clearAllTimers]);
+  }, [abortRecognizer, clearAllTimers, stopVad]);
 
   const toggleMute = useCallback(() => {
     const nextMuted = !isMutedRef.current;
@@ -615,5 +702,8 @@ export function useLiveCall(options: UseLiveCallOptions) {
     nextPrompt,
     selectLevel,
     simulateAttempt,
+    getMicLevel,
+    bargeInEnabled,
+    setBargeInEnabled,
   };
 }

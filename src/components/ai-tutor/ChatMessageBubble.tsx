@@ -75,7 +75,7 @@ export function ChatMessageBubble({
     return (
       <div className="flex justify-end">
         <div className="max-w-[85%] sm:max-w-[75%]">
-          <div className="rounded-2xl rounded-br-md bg-[#292524] px-4 py-3 text-sm leading-relaxed text-[#FFFFFF]">
+          <div className="rounded-2xl rounded-br-md bg-brand px-4 py-3 text-sm leading-relaxed text-[#FFFFFF]">
             <p className="whitespace-pre-wrap break-words font-medium">
               {userText}
             </p>
@@ -148,7 +148,7 @@ export function ChatMessageBubble({
                     onClick={() => setShowPinyin((prev) => !prev)}
                     className={`rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors cursor-pointer ${
                       showPinyin
-                        ? "border-[#292524] bg-[#292524] text-white"
+                        ? "border-brand bg-brand-soft text-brand-active"
                         : "border-[#E5E5E0] bg-[#F2F2F0] text-[#4A4540] hover:bg-[#E5E5E0]"
                     }`}
                     title="Bật/Tắt hiển thị Pinyin cho tin nhắn này"
@@ -162,7 +162,7 @@ export function ChatMessageBubble({
                   onClick={handleToggleSpeak}
                   className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
                     isSpeaking
-                      ? "bg-[#292524] text-[#FFFFFF]"
+                      ? "bg-brand-soft text-brand-active ring-1 ring-brand"
                       : "border border-[#E5E5E0] bg-[#F2F2F0] text-[#4A4540] hover:bg-[#E5E5E0]"
                   }`}
                   title={

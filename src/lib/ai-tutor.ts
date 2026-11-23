@@ -1,4 +1,13 @@
 import type { AIPersonaMode } from "@/types";
+import {
+  ATTITUDE_RULES,
+  BAOBAO_CORE_RULES,
+  clampHint,
+  ensureOpenQuestion,
+  type HskLevel,
+} from "@/lib/baobao-prompt";
+
+export type { HskLevel } from "@/lib/baobao-prompt";
 
 export type AILevelLimit = "HSK1" | "HSK3" | "HSK5" | "free";
 export type AIRoleplayRole = "teacher" | "friend" | "staff" | "examiner";
@@ -33,10 +42,13 @@ export interface TutorReply {
   contentPinyin?: string;
   contentVi: string;
   grammarCorrection?: string;
+  /** Short Vietnamese correction caption (≤15 words), empty/undefined if no error. */
+  correctionHint?: string;
 }
 
 export interface MockTutorOptions {
   levelLimit?: AILevelLimit;
+  hskLevel?: HskLevel;
   roleplayRole?: AIRoleplayRole;
   roleplay?: string;
   analyzeOnly?: boolean;
@@ -135,7 +147,7 @@ export const AI_PERSONAS: Record<AIPersonaMode, AIPersonaConfig> = {
       "Gia sư BaoBao khó tính, lạnh lùng, hay thở dài và chê thẳng thừng mỗi khi bạn sai thanh điệu hay lượng từ — nhưng sửa bài cực chuẩn.",
     badgeColor: "bg-[#E5E5E0] text-[#292524]",
     systemPrompt:
-      "Bạn là gia sư tiếng Trung BaoBao cực kỳ khó tính, lạnh lùng và hay khinh bỉ nhẹ (tsundere/strict) khi học viên mắc lỗi cơ bản về ngữ pháp, lượng từ hay câu chữ 把. Luôn giữ thái độ sắc sảo, hơi mỉa mai nhưng KHÔNG xúc phạm thô tục, và luôn sửa ngữ pháp tiếng Trung cực kỳ chính xác.",
+      `${BAOBAO_CORE_RULES}\n${ATTITUDE_RULES["khinh-bi"]}`,
   },
   "cuoi-nhao": {
     id: "cuoi-nhao",
@@ -145,7 +157,7 @@ export const AI_PERSONAS: Record<AIPersonaMode, AIPersonaConfig> = {
       "Gia sư BaoBao hài hước, lầy lội, hay trêu chọc và cười phá lên trước lỗi sai 'khó đỡ' của bạn để giúp bạn nhớ bài lâu hơn.",
     badgeColor: "bg-[#F2F2F0] text-[#4A4540] border border-[#E5E5E0]",
     systemPrompt:
-      "Bạn là gia sư tiếng Trung BaoBao siêu hài hước, lầy lội, thích trêu chọc và cười nhạo vui vẻ mỗi khi học viên viết sai chữ Hán hay ghép câu kiểu Việt-Trung. Dùng giọng điệu dí dỏm, thêm emoji vui nhộn, nhưng vẫn giải thích ngữ pháp rõ ràng.",
+      `${BAOBAO_CORE_RULES}\n${ATTITUDE_RULES["cuoi-nhao"]}`,
   },
   "binh-thuong": {
     id: "binh-thuong",
@@ -155,7 +167,7 @@ export const AI_PERSONAS: Record<AIPersonaMode, AIPersonaConfig> = {
       "Gia sư BaoBao chuyên nghiệp, điềm đạm, giải thích súc tích và tập trung tối đa vào hiệu quả học tập chuẩn HSK 3.0.",
     badgeColor: "bg-[#F2F2F0] text-[#262626] border border-[#E5E5E0]",
     systemPrompt:
-      "Bạn là gia sư tiếng Trung BaoBao chuyên nghiệp, điềm đạm và chuẩn mực. Trả lời rõ ràng, ngắn gọn bằng chữ Hán kèm Pinyin, bản dịch tiếng Việt và sửa lỗi ngữ pháp nếu có.",
+      `${BAOBAO_CORE_RULES}\n${ATTITUDE_RULES["binh-thuong"]}`,
   },
   "vui-ve": {
     id: "vui-ve",
@@ -165,7 +177,7 @@ export const AI_PERSONAS: Record<AIPersonaMode, AIPersonaConfig> = {
       "Gia sư BaoBao nhiệt tình, ấm áp, luôn cổ vũ và khen ngợi từng bước tiến nhỏ của bạn để tạo động lực học mỗi ngày.",
     badgeColor: "bg-[#292524] text-[#FFFFFF]",
     systemPrompt:
-      "Bạn là gia sư tiếng Trung BaoBao cực kỳ vui vẻ, thân thiện và tràn đầy năng lượng tích cực. Luôn động viên, khen ngợi học viên và sửa lỗi một cách nhẹ nhàng, khích lệ.",
+      `${BAOBAO_CORE_RULES}\n${ATTITUDE_RULES["vui-ve"]}`,
   },
 };
 
@@ -181,6 +193,11 @@ interface GrammarRuleCheck {
   correction: string;
   tipZh: string;
   tipPinyin: string;
+  hint: string;
+  /** Natural reply that reuses the correct structure (recast) + open question. */
+  recastZh: string;
+  recastPy: string;
+  recastVi: string;
 }
 
 const GRAMMAR_CHECKS: GrammarRuleCheck[] = [
@@ -190,6 +207,10 @@ const GRAMMAR_CHECKS: GrammarRuleCheck[] = [
       "Sai cấu trúc câu vị ngữ tính từ! Trong tiếng Trung, không dùng '是 (shì)' trước phó từ chỉ mức độ '很 (hěn) + Tính từ'.\n→ Tự nhiên hơn: \"我很好 (Wǒ hěn hǎo)\" hoặc \"他很忙 (Tā hěn máng)\".",
     tipZh: "形容词谓语句不能用“是”，应该直接说：“我很好”或“他很忙”！",
     tipPinyin: "Xíngróngcí wèiyǔjù bù néng yòng 'shì', yīnggāi zhíjiē shuō: 'Wǒ hěn hǎo'!",
+    hint: "Bỏ 是 trước tính từ: 我是很好 → 我很好",
+    recastZh: "哦，你很好呀！我也很好呢。今天有什么开心的事吗？",
+    recastPy: "Ò, nǐ hěn hǎo ya! Wǒ yě hěn hǎo ne. Jīntiān yǒu shénme kāixīn de shì ma?",
+    recastVi: "Ồ, bạn khỏe à! Mình cũng khỏe nè. Hôm nay có chuyện gì vui không?",
   },
   {
     pattern: /我去北京明天|我学习中文在学校|我吃饭在家/,
@@ -197,6 +218,10 @@ const GRAMMAR_CHECKS: GrammarRuleCheck[] = [
       "Sai trật tự trạng ngữ chỉ thời gian / địa điểm! Trong tiếng Trung, Thời gian và Địa điểm (在 + Nơi chốn) PHẢI đứng TRƯỚC động từ chính.\n→ Tự nhiên hơn: \"我明天去北京\" / \"我在学校学习中文\" / \"我在家吃饭\".",
     tipZh: "中文里时间和地点状语要放在动词前面，比如：“我明天去北京”、“我在家吃饭”！",
     tipPinyin: "Zhōngwén lǐ shíjiān hé dìdiǎn zhuàngyǔ yào fàng zài dòngcí qiánmiàn!",
+    hint: "Thời gian/nơi chốn đặt trước động từ: 我明天去北京",
+    recastZh: "哇，你明天去北京呀？真好！你去北京做什么呢？",
+    recastPy: "Wa, nǐ míngtiān qù Běijīng ya? Zhēn hǎo! Nǐ qù Běijīng zuò shénme ne?",
+    recastVi: "Oa, mai bạn đi Bắc Kinh à? Thích ghê! Bạn đi Bắc Kinh làm gì thế?",
   },
   {
     pattern: /一个书|一个水|一个车|一个衣服/,
@@ -204,6 +229,10 @@ const GRAMMAR_CHECKS: GrammarRuleCheck[] = [
       "Sai lượng từ (量词)! Không dùng '个 (gè)' cho mọi danh từ.\n→ Chuẩn xác: \"一本书 (yì běn shū)\", \"一杯水 (yì bēi shuǐ)\", \"一辆车 (yí liàng chē)\", \"一件衣服 (yí jiàn yīfu)\".",
     tipZh: "量词用错啦！书用“本”，水用“杯”，车用“辆”，衣服用“件”。",
     tipPinyin: "Liàngcí yòng cuò la! Shū yòng 'běn', shuǐ yòng 'bēi', chē yòng 'liàng'!",
+    hint: "Sai lượng từ: 一本书, 一杯水, 一辆车, 一件衣服",
+    recastZh: "一本书呀？是什么书呢？好看吗？",
+    recastPy: "Yì běn shū ya? Shì shénme shū ne? Hǎokàn ma?",
+    recastVi: "Một cuốn sách à? Sách gì thế? Hay không?",
   },
   {
     pattern: /不有/,
@@ -211,6 +240,10 @@ const GRAMMAR_CHECKS: GrammarRuleCheck[] = [
       "Sai phủ định của động từ '有 (yǒu)'! Phủ định của '有' bắt buộc là '没有 (méiyǒu)', tuyệt đối không dùng '不有'.\n→ Chuẩn xác: \"我没有时间 (Wǒ méiyǒu shíjiān)\".",
     tipZh: "“有”的否定形式永远是“没有”，绝对不能说“不有”！",
     tipPinyin: "'Yǒu' de fǒudìng xíngshì yǒngyuǎn shì 'méiyǒu', juéduì bù néng shuō 'bù yǒu'!",
+    hint: "Phủ định của 有 là 没有: 不有 → 没有",
+    recastZh: "哦，你没有时间呀？最近很忙吧？在忙什么呢？",
+    recastPy: "Ò, nǐ méiyǒu shíjiān ya? Zuìjìn hěn máng ba? Zài máng shénme ne?",
+    recastVi: "Ồ, bạn không có thời gian à? Dạo này bận lắm hả? Đang bận gì thế?",
   },
   {
     pattern: /二个|二本书|二天/,
@@ -218,6 +251,10 @@ const GRAMMAR_CHECKS: GrammarRuleCheck[] = [
       "Sai cách dùng '二 (èr)' và '两 (liǎng)'! Khi đứng trước lượng từ (个, 本, 天...), phải dùng '两 (liǎng)' chứ không dùng '二'.\n→ Chuẩn xác: \"两个 (liǎng gè)\", \"两本书 (liǎng běn shū)\".",
     tipZh: "在量词前面要用“两”（两个、两本书），不能用“二”！",
     tipPinyin: "Zài liàngcí qiánmiàn yào yòng 'liǎng' (liǎng gè, liǎng běn shū)!",
+    hint: "Trước lượng từ dùng 两: 二个 → 两个",
+    recastZh: "两个呀？那你想要哪两个呢？",
+    recastPy: "Liǎng gè ya? Nà nǐ xiǎng yào nǎ liǎng gè ne?",
+    recastVi: "Hai cái à? Vậy bạn muốn hai cái nào?",
   },
 ];
 
@@ -232,38 +269,38 @@ function wrapPersonaTone(
     case "khinh-bi":
       return {
         contentZh: hasError
-          ? `叹气……这种基础错误也会犯？${baseZh}`
-          : `哼，还算过得去吧。${baseZh}`,
+          ? `切，这都能说错？算了。${baseZh}`
+          : `哼，还行吧。${baseZh}`,
         contentPinyin: hasError
-          ? `Tànqì... Zhè zhǒng jīchǔ cuòwù yě huì fàn? ${basePinyin}`
-          : `Hēng, hái suàn guòdéqù ba. ${basePinyin}`,
+          ? `Qiè, zhè dōu néng shuō cuò? Suànle. ${basePinyin}`
+          : `Hēng, hái xíng ba. ${basePinyin}`,
         contentVi: hasError
-          ? `😒 Thở dài... Lỗi sơ cấp thế này mà cũng mắc được sao? ${baseVi}`
-          : `😒 Cũng tạm được đấy, nhưng đừng vội tự mãn. ${baseVi}`,
+          ? `😒 Xì, cái này mà cũng sai? Thôi được. ${baseVi}`
+          : `😒 Hừ, tạm được. ${baseVi}`,
       };
     case "cuoi-nhao":
       return {
         contentZh: hasError
-          ? `哈哈哈，笑死我了！😂 ${baseZh}`
+          ? `哈哈哈，你呀你！😂 ${baseZh}`
           : `哟，今天开窍了嘛！😂 ${baseZh}`,
         contentPinyin: hasError
-          ? `Hāhāhā, xiàosǐ wǒ le! ${basePinyin}`
+          ? `Hāhāhā, nǐ ya nǐ! ${basePinyin}`
           : `Yō, jīntiān kāiqiào le ma! ${basePinyin}`,
         contentVi: hasError
-          ? `😂 Trời ơi cười xỉu! Người bản xứ nghe câu này chắc đứng hình 5 giây mất! ${baseVi}`
-          : `😂 Ồ nay đỉnh nha, viết chuẩn không có chỗ cho BaoBao cà khịa luôn! ${baseVi}`,
+          ? `😂 Haha, bạn ơi là bạn! ${baseVi}`
+          : `😂 Ô, hôm nay khôn ra rồi nha! ${baseVi}`,
       };
     case "vui-ve":
       return {
         contentZh: hasError
-          ? `别灰心，你已经很棒了！我们一起改一下：${baseZh}`
-          : `太棒了！你的中文进步神速！${baseZh}`,
+          ? `没关系哦，你很棒呀！${baseZh}`
+          : `太棒了呀！${baseZh}`,
         contentPinyin: hasError
-          ? `Bié huīxīn, nǐ yǐjīng hěn bàng le! ${basePinyin}`
-          : `Tài bàng le! Nǐ de Zhōngwén jìnbù shénsù! ${basePinyin}`,
+          ? `Méi guānxi o, nǐ hěn bàng ya! ${basePinyin}`
+          : `Tài bàng le ya! ${basePinyin}`,
         contentVi: hasError
-          ? `😄 Cố gắng rất tốt luôn! Sai một chút không sao cả, sửa là nhớ ngay nè: ${baseVi}`
-          : `😄 Tuyệt vời! Tiếng Trung của bạn tiến bộ nhanh lắm đó! ${baseVi}`,
+          ? `😄 Không sao đâu, bạn giỏi lắm! ${baseVi}`
+          : `😄 Tuyệt quá! ${baseVi}`,
       };
     case "binh-thuong":
     default:
@@ -280,12 +317,39 @@ export function generateMockTutorResponse(
   persona: AIPersonaMode = "binh-thuong",
   optionsOrRoleplay?: string | MockTutorOptions
 ): TutorReply {
+  return finalizeTutorReply(generateRawMock(message, persona, optionsOrRoleplay));
+}
+
+/** Enforce BaoBao rules on any reply: ends with open question, hint ≤15 words. */
+export function finalizeTutorReply(reply: TutorReply): TutorReply {
+  const q = ensureOpenQuestion(reply.contentZh, reply.contentPinyin, reply.contentVi);
+  return {
+    ...reply,
+    contentZh: q.zh,
+    contentPinyin: q.py,
+    contentVi: q.vi,
+    correctionHint: clampHint(reply.correctionHint),
+  };
+}
+
+function hskToLimit(level: HskLevel): AILevelLimit {
+  return level <= 2 ? "HSK1" : level <= 4 ? "HSK3" : "HSK5";
+}
+
+function generateRawMock(
+  message: string,
+  persona: AIPersonaMode,
+  optionsOrRoleplay?: string | MockTutorOptions
+): TutorReply {
   const options: MockTutorOptions =
     typeof optionsOrRoleplay === "string"
       ? { roleplay: optionsOrRoleplay }
       : optionsOrRoleplay ?? {};
 
-  const levelLimit: AILevelLimit = options.levelLimit ?? "HSK3";
+  const levelLimit: AILevelLimit =
+    options.hskLevel !== undefined
+      ? hskToLimit(options.hskLevel)
+      : options.levelLimit ?? "HSK3";
   const roleplayRole: AIRoleplayRole = options.roleplayRole ?? "teacher";
   const text = message.trim();
   const lower = text.toLowerCase();
@@ -295,14 +359,15 @@ export function generateMockTutorResponse(
     if (rule.pattern.test(text)) {
       const styled = wrapPersonaTone(
         persona,
-        `${rule.tipZh} 请重新写一遍吧！`,
-        `${rule.tipPinyin} Qǐng chóngxīn xiě yí biàn ba!`,
-        `Bạn vừa mắc một điểm ngữ pháp tiếng Trung kinh điển. Xem phần Phân tích & Sửa lỗi bên dưới rồi thử viết lại nhé!`,
+        rule.recastZh,
+        rule.recastPy,
+        rule.recastVi,
         true
       );
       return {
         ...styled,
         grammarCorrection: rule.correction,
+        correctionHint: rule.hint,
       };
     }
   }
@@ -311,9 +376,9 @@ export function generateMockTutorResponse(
   if (options.analyzeOnly) {
     const styled = wrapPersonaTone(
       persona,
-      `我已经分析了你的句子：“${text}”。结构清晰，表达自然！`,
-      `Wǒ yǐjīng fēnxī le nǐ de jùzi: "${text}". Jiégòu qīngxī, biǎodá zìrán!`,
-      `BaoBao đã phân tích câu "${text}" của bạn. Xem gợi ý diễn đạt bên dưới nhé!`,
+      `嗯，“${text}”挺自然的嘛！你想用它聊什么话题呀？`,
+      `Ńg, "${text}" tǐng zìrán de ma! Nǐ xiǎng yòng tā liáo shénme huàtí ya?`,
+      `Ừm, câu "${text}" khá tự nhiên đấy! Bạn muốn dùng câu này nói chuyện về chủ đề gì nào?`,
       false
     );
     return {
@@ -334,16 +399,16 @@ export function generateMockTutorResponse(
   ) {
     const zh =
       levelLimit === "HSK1"
-        ? "您好！请问您想买什么？我们可以用微信或者支付宝付款。"
-        : "您好！欢迎光临。请问您对哪款产品感兴趣？如果订货量大，我们可以给您最优惠的出厂批发价。";
+        ? "您好呀！微信、支付宝都能付哦。您今天想买点什么呢？"
+        : "您好呀！大单有出厂批发价哦。您先看看哪一款产品呢？";
     const py =
       levelLimit === "HSK1"
-        ? "Nínhǎo! Qǐngwèn nín xiǎng mǎi shénme? Wǒmen kěyǐ yòng Wēixìn huòzhě Zhīfùbǎo fùkuǎn."
-        : "Nínhǎo! Huānyíng guānglín. Qǐngwèn nín duì nǎ kuǎn chǎnpǐn gǎn xìngqù? Rúguǒ dìnghuòliàng dà, wǒmen kěyǐ gěi nín zuì yōuhuì de chūchǎng pīfājià.";
+        ? "Nínhǎo ya! Wēixìn, Zhīfùbǎo dōu néng fù o. Nín jīntiān xiǎng mǎi diǎn shénme ne?"
+        : "Nínhǎo ya! Dà dān yǒu chūchǎng pīfājià o. Nín xiān kànkan nǎ yì kuǎn chǎnpǐn ne?";
     const vi =
       levelLimit === "HSK1"
-        ? "Xin chào quý khách! Quý khách muốn mua gì ạ? Chúng tôi nhận thanh toán qua WeChat hoặc Alipay."
-        : "Xin chào! Chào mừng quý khách. Quý khách quan tâm tới mẫu sản phẩm nào? Nếu số lượng đặt lớn, chúng tôi sẽ để giá sỉ xuất xưởng ưu đãi nhất.";
+        ? "Chào bạn nha! WeChat hay Alipay đều thanh toán được nhé. Hôm nay bạn muốn mua gì nào?"
+        : "Chào quý khách nha! Đơn lớn có giá sỉ tận xưởng nhé. Bạn muốn xem mẫu nào trước nào?";
     return wrapPersonaTone(persona, zh, py, vi, false);
   }
 
@@ -376,24 +441,30 @@ export function generateMockTutorResponse(
   }
 
   if (/(你好|您好|嗨|早上好|晚上好|xin chào|chào)/i.test(lower)) {
-    const zh = "你好！很高兴和你一起练习中文。今天你想聊什么话题呢？";
-    const py = "Nǐ hǎo! Hěn gāoxìng hé nǐ yìqǐ liànxí Zhōngwén. Jīntiān nǐ xiǎng liáo shénme huàtí ne?";
-    const vi = "Chào bạn! Rất vui được cùng bạn luyện tiếng Trung. Hôm nay bạn muốn trò chuyện về chủ đề gì nào?";
+    const zh = "你好呀！今天过得怎么样？想聊点什么呢？";
+    const py = "Nǐ hǎo ya! Jīntiān guò de zěnmeyàng? Xiǎng liáo diǎn shénme ne?";
+    const vi = "Chào bạn nha! Hôm nay thế nào? Muốn tán gẫu gì nè?";
     return wrapPersonaTone(persona, zh, py, vi, false);
   }
 
   const defaultZh =
     levelLimit === "HSK1"
-      ? `说得很好！你写了：“${text}”。你能再用这个词造一个句子吗？`
-      : `很有意思的表达：“${text}”。你能用“因为……所以……”或者“不仅……而且……”再扩展一下你的看法吗？`;
+      ? `嗯嗯，“${text}”，我懂啦！那你今天吃了什么呀？`
+      : levelLimit === "HSK5"
+        ? `哦？“${text}”，挺有意思嘛！你平时也经常遇到这种事吗？`
+        : `哦？“${text}”，有意思呢！为什么这么说呀？`;
   const defaultPy =
     levelLimit === "HSK1"
-      ? `Shuō de hěn hǎo! Nǐ xiě le: "${text}". Nǐ néng zài yòng zhège cí zào yígè jùzi ma?`
-      : `Hěn yǒuyìsi de biǎodá: "${text}". Nǐ néng yòng "yīnwèi... suǒyǐ..." zài kuòzhǎn yíxià nǐ de kànfǎ ma?`;
+      ? `Ńg ńg, "${text}", wǒ dǒng la! Nà nǐ jīntiān chī le shénme ya?`
+      : levelLimit === "HSK5"
+        ? `Ò? "${text}", tǐng yǒuyìsi ma! Nǐ píngshí yě jīngcháng yùdào zhè zhǒng shì ma?`
+        : `Ò? "${text}", yǒuyìsi ne! Wèishénme zhème shuō ya?`;
   const defaultVi =
     levelLimit === "HSK1"
-      ? `Nói tốt lắm! Bạn vừa viết: "${text}". Bạn có thể đặt thêm một câu nữa với từ này không?`
-      : `Cách diễn đạt rất thú vị: "${text}". Bạn thử dùng cấu trúc "因为...所以..." hoặc "不仅...而且..." để mở rộng thêm ý kiến của mình nhé!`;
+      ? `Ừm ừm, "${text}", mình hiểu rồi! Thế hôm nay bạn ăn gì thế?`
+      : levelLimit === "HSK5"
+        ? `Ồ? "${text}", thú vị đấy chứ! Bình thường bạn cũng hay gặp chuyện kiểu này à?`
+        : `Ồ? "${text}", thú vị nè! Sao bạn lại nói vậy?`;
 
   return wrapPersonaTone(persona, defaultZh, defaultPy, defaultVi, false);
 }

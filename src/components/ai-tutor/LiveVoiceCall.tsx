@@ -1,7 +1,10 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Camera,
+  CameraOff,
+  Captions,
   ChevronDown,
   ChevronUp,
   Mic,
@@ -9,11 +12,13 @@ import {
   Phone,
   PhoneOff,
   RotateCcw,
+  Settings,
   SkipForward,
   Sparkles,
   Volume2,
   VolumeX,
   Wand2,
+  X,
 } from "lucide-react";
 import { InteractiveChineseText } from "@/components/dictionary/InteractiveChineseText";
 import {
@@ -105,16 +110,25 @@ export function LiveVoiceCall({
   initialLevel = "HSK1",
 }: LiveVoiceCallProps) {
   const [level, setLevel] = useState<CallLevel>(initialLevel);
-  const [avatarGender, setAvatarGender] = useState<AvatarGender>("female");
+  const [avatarGender] = useState<AvatarGender>("female");
   const [playViVoice, setPlayViVoice] = useState(true);
   const [speechRate, setSpeechRate] = useState<number>(0.95);
   const [autoNext, setAutoNext] = useState(false);
+  const [showCaptions, setShowCaptions] = useState(true);
   const [showCallPinyin, setShowCallPinyin] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showPhonemeCoaching, setShowPhonemeCoaching] = useState(false);
+
   const [zhVoices, setZhVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedZhVoice, setSelectedZhVoice] = useState<string>("");
   const [isTestingVoice, setIsTestingVoice] = useState(false);
   const [activeVoiceLabel, setActiveVoiceLabel] = useState<string>("");
-  const [showPhonemeCoaching, setShowPhonemeCoaching] = useState(false);
+
+  // PiP Webcam state
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const camStreamRef = useRef<MediaStream | null>(null);
 
   const {
     callState,
@@ -138,6 +152,8 @@ export function LiveVoiceCall({
     nextPrompt,
     selectLevel,
     simulateAttempt,
+    bargeInEnabled,
+    setBargeInEnabled,
   } = useLiveCall({
     persona,
     level,
@@ -146,6 +162,51 @@ export function LiveVoiceCall({
     speechRate,
     autoNext,
   });
+
+  // Stop webcam stream helper
+  const stopCamera = useCallback(() => {
+    if (camStreamRef.current) {
+      camStreamRef.current.getTracks().forEach((t) => t.stop());
+      camStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setIsCameraOn(false);
+  }, []);
+
+  const toggleCamera = useCallback(async () => {
+    if (isCameraOn) {
+      stopCamera();
+      return;
+    }
+    setCameraError(null);
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setCameraError("Trình duyệt không hỗ trợ Camera.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 480 }, height: { ideal: 360 } },
+        audio: false,
+      });
+      camStreamRef.current = stream;
+      setIsCameraOn(true);
+    } catch {
+      setCameraError("Chưa được cấp quyền Camera.");
+      setIsCameraOn(false);
+    }
+  }, [isCameraOn, stopCamera]);
+
+  // Attach MediaStream once video element mounts
+  useEffect(() => {
+    if (isCameraOn && videoRef.current && camStreamRef.current) {
+      videoRef.current.srcObject = camStreamRef.current;
+    }
+  }, [isCameraOn]);
+
+  // Cleanup camera on unmount
+  useEffect(() => () => stopCamera(), [stopCamera]);
 
   useEffect(() => {
     setPreferredVoiceName("zh", selectedZhVoice || undefined);
@@ -157,26 +218,14 @@ export function LiveVoiceCall({
   useEffect(() => {
     const syncVoices = () => {
       setZhVoices(getAvailableVoices("zh"));
-      const zh = resolveVoiceConfig(
-        "zh",
-        avatarGender,
-        selectedZhVoice || undefined
-      );
+      const zh = resolveVoiceConfig("zh", avatarGender, selectedZhVoice || undefined);
       const vi = resolveVoiceConfig("vi", avatarGender);
       const zhLabel = zh.voice
         ? zh.isFallbackPitch
           ? `${zh.voice.name} (pitch ${zh.pitch})`
           : zh.voice.name
-        : avatarGender === "male"
-          ? "Minh Long (Trầm 0.78)"
-          : "Bảo Linh (Sáng 1.15)";
-      const viLabel = vi.voice
-        ? vi.isFallbackPitch
-          ? `${vi.voice.name} (pitch ${vi.pitch})`
-          : vi.voice.name
-        : avatarGender === "male"
-          ? "Nam (0.78)"
-          : "Nữ (1.15)";
+        : "BaoBao (zh-CN)";
+      const viLabel = vi.voice ? vi.voice.name : "Tiếng Việt";
       setActiveVoiceLabel(`ZH: ${zhLabel} · VI: ${viLabel}`);
     };
 
@@ -191,13 +240,9 @@ export function LiveVoiceCall({
 
   const handleTestVoice = () => {
     setIsTestingVoice(true);
-    const isMale = avatarGender === "male";
-    const sampleVi = isMale
-      ? "Chào bạn, mình là Minh Long. Hôm nay mình cùng luyện phát âm 4 thanh điệu tiếng Trung nhé!"
-      : "Chào bạn, mình là Bảo Linh. Hôm nay mình cùng luyện phát âm 4 thanh điệu tiếng Trung nhé!";
-    const sampleZh = isMale
-      ? "你好！我是明龙老师。今天我们一起练习标准的中文发音吧！"
-      : "你好！我是宝玲老师。今天我们一起练习标准的中文发音吧！";
+    const sampleVi =
+      "Chào bạn, mình là Capybara BaoBao! Hôm nay mình cùng luyện phát âm 4 thanh điệu tiếng Trung nhé!";
+    const sampleZh = "你好呀！我是宝宝老师。今天我们一起练习标准的中文发音吧！";
 
     speakBilingualTurn(sampleVi, sampleZh, {
       playVi: playViVoice,
@@ -212,45 +257,41 @@ export function LiveVoiceCall({
     });
   };
 
-  const activePersona = AI_PERSONAS[persona] ?? AI_PERSONAS["binh-thuong"];
+  const handleEndCall = () => {
+    endCall();
+    stopCamera();
+  };
 
-  const avatarState: AvatarState =
-    callState === "thinking" ? "analyzing" : callState;
+  const activePersona = AI_PERSONAS[persona] ?? AI_PERSONAS["binh-thuong"];
+  const avatarState: AvatarState = callState === "thinking" ? "analyzing" : callState;
 
   const statusMeta = useMemo(() => {
     switch (callState) {
       case "speaking":
         return {
-          label: "Gia sư BaoBao đang đọc mẫu...",
-          dotClass: "bg-[#292524] animate-pulse",
+          label: bargeInEnabled
+            ? "BaoBao đang nói · Nói để ngắt lời"
+            : "BaoBao đang đọc mẫu...",
+          dotClass: "bg-[#F26B5B] animate-pulse",
         };
       case "listening":
         return {
-          label: "Đang nghe bạn nói tiếng Trung...",
-          dotClass: "bg-[#15803D] animate-ping",
+          label: "BaoBao đang lắng nghe bạn...",
+          dotClass: "bg-emerald-400 animate-ping",
         };
       case "thinking":
         return {
           label: "Đang chấm thanh điệu & âm bật hơi...",
-          dotClass: "bg-[#6B655E] animate-pulse",
+          dotClass: "bg-amber-400 animate-pulse",
         };
       default:
         return {
-          label: isCallActive ? "Đang chờ lượt nói" : "Sẵn sàng kết nối",
-          dotClass: "bg-[#A8A29E]",
+          label: isCallActive ? "Đang chờ lượt nói" : "Sẵn sàng gọi BaoBao 3D",
+          dotClass: "bg-stone-400",
         };
     }
-  }, [callState, isCallActive]);
+  }, [callState, isCallActive, bargeInEnabled]);
 
-  const handleToggleCall = () => {
-    if (isCallActive) {
-      endCall();
-    } else {
-      startCall();
-    }
-  };
-
-  // Character-level pronunciation heatmap
   const charHeatmap = useMemo(() => {
     if (!evaluation || !currentPrompt) return null;
     const matchedSet = new Set(evaluation.matchedWords);
@@ -272,320 +313,496 @@ export function LiveVoiceCall({
   }, [currentPrompt]);
 
   return (
-    <div className="flex flex-1 flex-col overflow-y-auto bg-[#F2F2F0]/40 px-4 py-5 sm:px-6">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
-        {/* Top Controls: Level, Speed, Dual-Voice, Pinyin Toggle, Auto-Next, Persona */}
-        <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-[#E5E5E0] bg-white p-3.5">
-          {/* Level Selector */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
-              Cấp độ:
-            </span>
-            <div className="flex items-center gap-1">
-              {CALL_LEVELS.map((lvl) => (
-                <button
-                  key={lvl.id}
-                  type="button"
-                  onClick={() => handleSelectCallLevel(lvl.id)}
-                  className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
-                    level === lvl.id
-                      ? "bg-[#292524] text-white"
-                      : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:bg-[#F2F2F0]"
-                  }`}
-                >
-                  {lvl.label}
-                </button>
-              ))}
+    <div className="flex flex-1 flex-col overflow-y-auto bg-[#F2F2F0]/40 px-3 py-4 sm:px-5">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
+        {/* ─── Immersive Live Call Stage ─── */}
+        <div className="relative flex min-h-[600px] flex-col justify-between overflow-hidden rounded-3xl border border-stone-800/80 bg-gradient-to-b from-[#231D1A] via-[#1B1614] to-[#13100E] text-white shadow-2xl sm:min-h-[660px]">
+          {/* Subtle ambient coral glow behind BaoBao */}
+          <div
+            className={`pointer-events-none absolute left-1/2 top-[34%] h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl transition-opacity duration-500 ${
+              callState === "speaking"
+                ? "bg-[#F26B5B]/25 opacity-100"
+                : callState === "listening"
+                  ? "bg-emerald-500/20 opacity-90"
+                  : "bg-[#E59A5C]/15 opacity-60"
+            }`}
+          />
+
+          {/* ── Top Floating HUD ── */}
+          <div className="relative z-20 flex flex-wrap items-center justify-between gap-2 px-4 pt-4 sm:px-6">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3.5 py-1.5 backdrop-blur-md">
+                <span className={`h-2 w-2 rounded-full ${statusMeta.dotClass}`} />
+                <span className="text-xs font-semibold text-white">
+                  BaoBao 3D · {activePersona.emoji} {activePersona.label}
+                </span>
+              </div>
+              <span className="rounded-full border border-[#F26B5B]/40 bg-[#F26B5B]/15 px-2.5 py-1 text-[11px] font-semibold text-[#FF9B8E]">
+                {level}
+              </span>
+              <span className="hidden text-xs text-stone-300 sm:inline">
+                {statusMeta.label}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-medium text-stone-200 backdrop-blur-md">
+                {practicedCount} câu · TB {avgAccuracy}%
+              </span>
+              <button
+                type="button"
+                onClick={replayModel}
+                title="Nghe lại câu mẫu"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-white/10 text-stone-200 backdrop-blur-md transition-colors hover:bg-white/20 cursor-pointer"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={nextPrompt}
+                title="Chuyển câu tiếp theo"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-white/10 text-stone-200 backdrop-blur-md transition-colors hover:bg-white/20 cursor-pointer"
+              >
+                <SkipForward className="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
 
-          {/* Speed Toggle */}
-          <div
-            className="inline-flex items-center rounded-full border border-[#E5E5E0] bg-[#FAF9F7] p-0.5"
-            role="group"
-            aria-label="Tốc độ đọc"
-          >
-            {VOICE_CALL_SPEEDS.map((spd) => (
-              <button
-                key={spd}
-                type="button"
-                onClick={() => setSpeechRate(spd)}
-                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold transition-colors cursor-pointer ${
-                  speechRate === spd
-                    ? "bg-[#292524] text-white"
-                    : "text-[#737373] hover:text-[#262626]"
-                }`}
-              >
-                {spd}x
-              </button>
-            ))}
+          {/* ── PiP Webcam (top-right, mirrored, rounded) ── */}
+          {isCameraOn && (
+            <div className="absolute right-4 top-16 z-30 h-28 w-36 overflow-hidden rounded-2xl border-2 border-white/25 bg-black/70 shadow-2xl sm:h-36 sm:w-48">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="h-full w-full -scale-x-100 object-cover"
+              />
+              <span className="absolute bottom-1.5 left-2 rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
+                Bạn
+              </span>
+            </div>
+          )}
+
+          {/* ── Center 3D Capybara BaoBao Stage (unobstructed) ── */}
+          <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-4 py-2">
+            <div className="h-[260px] w-full max-w-[340px] sm:h-[310px] sm:max-w-[400px]">
+              <Avatar3D
+                gender={avatarGender}
+                state={avatarState}
+                persona={persona}
+                isHappyResult={Boolean(evaluation?.passed)}
+                fill
+              />
+            </div>
+
+            {/* Subtle inline hints (error / no-speech / camera) */}
+            {(noSpeechHint || errorMsg || cameraError) && (
+              <div className="mt-1 flex flex-wrap justify-center gap-1.5">
+                {noSpeechHint && (
+                  <span className="rounded-full border border-amber-400/30 bg-amber-500/15 px-3 py-1 text-[11px] text-amber-200 backdrop-blur-sm">
+                    {noSpeechHint}
+                  </span>
+                )}
+                {errorMsg && (
+                  <span className="rounded-full border border-red-400/30 bg-red-500/20 px-3 py-1 text-[11px] text-red-200 backdrop-blur-sm">
+                    {errorMsg}
+                  </span>
+                )}
+                {cameraError && (
+                  <span className="rounded-full border border-red-400/30 bg-red-500/20 px-3 py-1 text-[11px] text-red-200 backdrop-blur-sm">
+                    {cameraError}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Pinyin Toggle */}
-          <button
-            type="button"
-            onClick={() => setShowCallPinyin((prev) => !prev)}
-            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
-              showCallPinyin
-                ? "border-[#292524] bg-[#292524] text-white"
-                : "border-[#E5E5E0] bg-white text-[#737373] hover:text-[#262626]"
-            }`}
-          >
-            <span>{showCallPinyin ? "Pinyin: Bật" : "Pinyin: Tắt"}</span>
-          </button>
+          {/* ── Floating Live Captions (below avatar, never covering BaoBao) ── */}
+          <div className="relative z-20 flex flex-col items-center gap-3 px-4 pb-5 sm:px-6">
+            {showCaptions && currentPrompt && (
+              <div className="w-full max-w-2xl rounded-2xl border border-white/15 bg-black/50 px-4 py-3 text-center backdrop-blur-xl">
+                <div className="mb-1 flex items-center justify-between text-[11px] text-stone-300">
+                  <span className="rounded-full bg-white/10 px-2 py-0.5 font-medium">
+                    {currentPrompt.topic} · {currentPrompt.level}
+                  </span>
+                  <span>
+                    Câu {(promptIndex % Math.max(1, totalPromptsInLevel)) + 1}/
+                    {totalPromptsInLevel}
+                  </span>
+                </div>
 
-          {/* Dual-Voice Toggle */}
-          <button
-            type="button"
-            onClick={() => setPlayViVoice((prev) => !prev)}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
-              playViVoice
-                ? "border-[#292524] bg-[#292524] text-white"
-                : "border-[#E5E5E0] bg-white text-[#737373] hover:text-[#262626]"
-            }`}
-            title="Bật hoặc tắt giọng hướng dẫn tiếng Việt"
-          >
-            {playViVoice ? (
-              <Volume2 className="h-3.5 w-3.5" />
-            ) : (
-              <VolumeX className="h-3.5 w-3.5" />
-            )}
-            <span>{playViVoice ? "Giọng Việt: Bật" : "Giọng Việt: Tắt"}</span>
-          </button>
+                {/* Target Hanzi */}
+                <div className="font-display text-lg font-bold leading-snug text-white sm:text-xl [&_span]:text-white">
+                  <InteractiveChineseText
+                    text={currentPrompt.targetZh}
+                    pinyin={currentPrompt.targetPinyin}
+                    showPinyin={false}
+                  />
+                </div>
 
-          {/* Auto-Next Toggle */}
-          <button
-            type="button"
-            onClick={() => setAutoNext((prev) => !prev)}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
-              autoNext
-                ? "border-[#6B655E] bg-[#6B655E] text-white"
-                : "border-[#E5E5E0] bg-[#FAF9F7] text-[#737373] hover:text-[#262626]"
-            }`}
-            title="Tự động chuyển sang câu tiếp theo khi phát âm đạt >= 75%"
-          >
-            <span>Tự chuyển câu: {autoNext ? "Bật" : "Tắt"}</span>
-          </button>
+                {/* Optional Pinyin */}
+                {showCallPinyin && (
+                  <p className="mt-0.5 font-mono text-xs text-[#FF9B8E]">
+                    {currentPrompt.targetPinyin}
+                  </p>
+                )}
 
-          {/* Persona Selector */}
-          <div className="flex w-full items-center justify-between gap-2 overflow-x-auto border-t border-[#E5E5E0] pt-2.5">
-            <div className="flex items-center gap-1.5">
-              <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
-                Thái độ:
-              </span>
-              <div className="flex items-center gap-1.5">
-                {AI_PERSONA_LIST.map((p) => {
-                  const active = p.id === persona;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => onChangePersona(p.id)}
-                      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                        active
-                          ? "bg-[#6B655E] text-white"
-                          : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:bg-[#F2F2F0]"
+                <p className="mt-1 text-xs text-stone-300">
+                  {currentPrompt.meaningVi}
+                </p>
+
+                {/* Live user speech transcript */}
+                {liveTranscript && (
+                  <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/15 px-3 py-1 text-xs text-emerald-200">
+                    <span className="opacity-75">Bạn nói:</span>
+                    <span className="font-semibold text-white">{liveTranscript}</span>
+                  </div>
+                )}
+
+                {/* Compact short correction & score */}
+                {evaluation && (
+                  <div className="mt-2 flex flex-wrap items-center justify-center gap-2 border-t border-white/10 pt-2 text-xs">
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 font-bold ${
+                        evaluation.accuracy >= 85
+                          ? "bg-emerald-500/20 text-emerald-300"
+                          : evaluation.accuracy >= 55
+                            ? "bg-amber-500/20 text-amber-200"
+                            : "bg-red-500/20 text-red-200"
                       }`}
                     >
-                      <span>{p.emoji}</span>
-                      <span>{p.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Call Session Stats */}
-            <span className="shrink-0 rounded-full border border-[#E5E5E0] bg-[#FAF9F7] px-2.5 py-1 text-[11px] font-semibold text-[#4A4540]">
-              Đã luyện {practicedCount} câu · TB {avgAccuracy}%
-            </span>
-          </div>
-        </div>
-
-        {/* Centered 3D Tutor Avatar Stage (Bảo Linh 宝玲 / Minh Long 明龙) */}
-        <div className="flex flex-col items-center justify-center rounded-3xl border border-[#E5E5E0] bg-white px-6 py-7 text-center shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
-          {/* Bảo Linh (Nữ) / Minh Long (Nam) Switcher */}
-          <div className="mb-2.5 inline-flex items-center rounded-full border border-[#E5E5E0] bg-[#FAF9F7] p-1">
-            {(
-              [
-                { id: "female", label: "Bảo Linh · 宝玲 (Nữ)" },
-                { id: "male", label: "Minh Long · 明龙 (Nam)" },
-              ] as const
-            ).map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => setAvatarGender(opt.id)}
-                className={`rounded-full px-3.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                  avatarGender === opt.id
-                    ? "bg-[#292524] text-white shadow-xs"
-                    : "text-[#737373] hover:text-[#262626]"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Direct zh-CN Voice Selector + Compact Voice Test Button */}
-          <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
-            <select
-              aria-label="Chọn giọng đọc tiếng Trung (zh-CN)"
-              value={selectedZhVoice}
-              onChange={(e) => setSelectedZhVoice(e.target.value)}
-              className="max-w-[230px] truncate rounded-full border border-[#E5E5E0] bg-[#FAF9F7] px-3 py-1 text-xs font-medium text-[#4A4540] outline-none transition-colors hover:border-[#6B655E] focus:border-[#292524] cursor-pointer"
-            >
-              <option value="">
-                Tự động ({avatarGender === "male" ? "Minh Long" : "Bảo Linh"})
-              </option>
-              {zhVoices.map((voice) => (
-                <option key={`${voice.name}-${voice.lang}`} value={voice.name}>
-                  {voice.name} ({voice.lang})
-                </option>
-              ))}
-            </select>
-
-            <button
-              type="button"
-              onClick={handleTestVoice}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                isTestingVoice
-                  ? "border-[#292524] bg-[#292524] text-white"
-                  : "border-[#E5E5E0] bg-white text-[#4A4540] hover:border-[#6B655E] hover:bg-[#FAF9F7]"
-              }`}
-              title="Nghe thử giọng đọc song ngữ của gia sư đang chọn"
-            >
-              <Volume2 className="h-3.5 w-3.5" />
-              <span>{isTestingVoice ? "Đang phát..." : "Nghe thử giọng"}</span>
-            </button>
-          </div>
-
-          {/* Avatar3D */}
-          <div className="rounded-full">
-            <Avatar3D
-              gender={avatarGender}
-              state={avatarState}
-              persona={persona}
-              isHappyResult={Boolean(evaluation?.passed)}
-              size={196}
-            />
-          </div>
-
-          <h2 className="mt-4 font-display text-lg font-bold text-[#262626]">
-            {avatarGender === "female"
-              ? "Bảo Linh (宝玲)"
-              : "Minh Long (明龙)"}{" "}
-            · {activePersona.label} ({level})
-          </h2>
-          {activeVoiceLabel && (
-            <p
-              className="mt-1 max-w-md truncate text-[11px] text-[#737373]"
-              title={activeVoiceLabel}
-            >
-              Giọng đọc: {activeVoiceLabel}
-            </p>
-          )}
-
-          {/* Live Status Pill */}
-          <div className="mt-2.5 inline-flex items-center gap-2 rounded-full border border-[#E5E5E0] bg-[#FAF9F7] px-3.5 py-1 text-xs font-semibold text-[#4A4540]">
-            <span className={`h-2 w-2 rounded-full ${statusMeta.dotClass}`} />
-            <span>{statusMeta.label}</span>
-          </div>
-
-          {noSpeechHint && (
-            <p className="mt-2.5 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-3 py-1.5 text-xs font-medium text-[#6B655E]">
-              {noSpeechHint}
-            </p>
-          )}
-          {!speechSupported && (
-            <p className="mt-2.5 text-xs text-[#737373]">
-              Trình duyệt chưa hỗ trợ micro — bạn có thể bấm{" "}
-              <strong className="text-[#262626]">
-                Giả lập đọc chuẩn / đọc 60%
-              </strong>{" "}
-              bên dưới để trải nghiệm chấm điểm thanh điệu.
-            </p>
-          )}
-          {errorMsg && (
-            <p className="mt-2 text-xs font-medium text-[#B91C1C]">{errorMsg}</p>
-          )}
-        </div>
-
-        {/* Live Bilingual Subtitle Card */}
-        {currentPrompt && (
-          <div className="space-y-3 rounded-2xl border border-[#E5E5E0] bg-white p-5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="rounded-full bg-[#F2F2F0] px-2.5 py-0.5 text-[11px] font-semibold text-[#4A4540]">
-                Chủ đề: {currentPrompt.topic} ({currentPrompt.level})
-              </span>
-              <span className="text-xs font-medium text-[#737373]">
-                Câu {(promptIndex % Math.max(1, totalPromptsInLevel)) + 1} /{" "}
-                {totalPromptsInLevel}
-              </span>
-            </div>
-
-            <p className="text-xs leading-relaxed text-[#737373]">
-              {currentPrompt.introVi}
-            </p>
-
-            {/* Target Chinese Sentence */}
-            <div className="rounded-2xl border border-[#E5E5E0] bg-[#FAF9F7] p-4">
-              <div className="font-display text-lg font-bold leading-relaxed text-[#262626] sm:text-xl">
-                <InteractiveChineseText
-                  text={currentPrompt.targetZh}
-                  pinyin={currentPrompt.targetPinyin}
-                  showPinyin={showCallPinyin}
-                />
-              </div>
-              {showCallPinyin && (
-                <p className="mt-1 font-mono text-xs text-[#6B655E]">
-                  {currentPrompt.targetPinyin}
-                </p>
-              )}
-              <p className="mt-1.5 text-sm text-[#57534E]">
-                {currentPrompt.meaningVi}
-              </p>
-              <div className="mt-2.5 flex items-start gap-1.5 border-t border-[#E5E5E0] pt-2.5 text-xs text-[#6B655E]">
-                <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>{currentPrompt.tipVi}</span>
-              </div>
-            </div>
-
-            {/* Live transcript from user */}
-            {liveTranscript && (
-              <div className="rounded-xl border border-[#E5E5E0] bg-white px-3.5 py-2.5 text-xs">
-                <span className="font-semibold text-[#737373]">
-                  Bạn vừa đọc:{" "}
-                </span>
-                <span className="font-medium text-[#262626]">
-                  {liveTranscript}
-                </span>
+                      {evaluation.accuracy}%{evaluation.passed ? " · +10 XP" : ""}
+                    </span>
+                    <span className="max-w-lg text-left text-stone-200 line-clamp-2">
+                      {evaluation.feedbackVi}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
+
+            {/* ── Floating Settings Popover (anchored above control bar) ── */}
+            {showSettings && (
+              <div className="w-full max-w-xl rounded-2xl border border-white/20 bg-[#1D1816]/95 p-4 text-left text-xs text-stone-200 shadow-2xl backdrop-blur-2xl">
+                <div className="mb-3 flex items-center justify-between border-b border-white/10 pb-2">
+                  <span className="font-display text-sm font-bold text-white">
+                    Cài đặt cuộc gọi BaoBao
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowSettings(false)}
+                    className="rounded-full p-1 text-stone-400 hover:bg-white/10 hover:text-white cursor-pointer"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {/* Level */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold text-stone-300">Cấp độ</span>
+                    <div className="flex flex-wrap gap-1">
+                      {CALL_LEVELS.map((lvl) => (
+                        <button
+                          key={lvl.id}
+                          type="button"
+                          onClick={() => handleSelectCallLevel(lvl.id)}
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer ${
+                            level === lvl.id
+                              ? "bg-[#F26B5B] text-white"
+                              : "bg-white/10 text-stone-300 hover:bg-white/20"
+                          }`}
+                        >
+                          {lvl.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Persona mood */}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold text-stone-300">Thái độ BaoBao</span>
+                    <div className="flex flex-wrap gap-1">
+                      {AI_PERSONA_LIST.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => onChangePersona(p.id)}
+                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                            p.id === persona
+                              ? "bg-[#F26B5B] text-white"
+                              : "bg-white/10 text-stone-300 hover:bg-white/20"
+                          }`}
+                        >
+                          <span>{p.emoji}</span>
+                          <span>{p.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Speed */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-stone-300">Tốc độ nói</span>
+                    <div className="inline-flex rounded-full bg-white/10 p-0.5">
+                      {VOICE_CALL_SPEEDS.map((spd) => (
+                        <button
+                          key={spd}
+                          type="button"
+                          onClick={() => setSpeechRate(spd)}
+                          className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold cursor-pointer ${
+                            speechRate === spd
+                              ? "bg-[#F26B5B] text-white"
+                              : "text-stone-300 hover:text-white"
+                          }`}
+                        >
+                          {spd}x
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Quick toggles */}
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowCallPinyin((v) => !v)}
+                      className={`rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer ${
+                        showCallPinyin
+                          ? "bg-[#F26B5B] text-white"
+                          : "bg-white/10 text-stone-300"
+                      }`}
+                    >
+                      Pinyin: {showCallPinyin ? "Bật" : "Tắt"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPlayViVoice((v) => !v)}
+                      className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer ${
+                        playViVoice
+                          ? "bg-[#F26B5B] text-white"
+                          : "bg-white/10 text-stone-300"
+                      }`}
+                    >
+                      {playViVoice ? (
+                        <Volume2 className="h-3 w-3" />
+                      ) : (
+                        <VolumeX className="h-3 w-3" />
+                      )}
+                      Giọng Việt: {playViVoice ? "Bật" : "Tắt"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAutoNext((v) => !v)}
+                      className={`rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer ${
+                        autoNext
+                          ? "bg-[#F26B5B] text-white"
+                          : "bg-white/10 text-stone-300"
+                      }`}
+                    >
+                      Tự chuyển câu: {autoNext ? "Bật" : "Tắt"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBargeInEnabled((v) => !v)}
+                      className={`rounded-full px-3 py-1 text-[11px] font-semibold cursor-pointer ${
+                        bargeInEnabled
+                          ? "bg-[#F26B5B] text-white"
+                          : "bg-white/10 text-stone-300"
+                      }`}
+                    >
+                      Ngắt lời (Barge-in): {bargeInEnabled ? "Bật" : "Tắt"}
+                    </button>
+                  </div>
+
+                  {/* zh-CN Voice selector + test */}
+                  <div className="flex flex-wrap items-center gap-2 border-t border-white/10 pt-2.5">
+                    <select
+                      aria-label="Chọn giọng đọc tiếng Trung (zh-CN)"
+                      value={selectedZhVoice}
+                      onChange={(e) => setSelectedZhVoice(e.target.value)}
+                      className="max-w-[220px] flex-1 truncate rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] text-white outline-none cursor-pointer"
+                    >
+                      <option value="" className="bg-stone-900">
+                        Tự động (BaoBao zh-CN)
+                      </option>
+                      {zhVoices.map((voice) => (
+                        <option
+                          key={`${voice.name}-${voice.lang}`}
+                          value={voice.name}
+                          className="bg-stone-900"
+                        >
+                          {voice.name} ({voice.lang})
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleTestVoice}
+                      className="inline-flex items-center gap-1 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-semibold text-white hover:bg-white/20 cursor-pointer"
+                    >
+                      <Volume2 className="h-3 w-3" />
+                      {isTestingVoice ? "Đang phát..." : "Nghe thử"}
+                    </button>
+                  </div>
+                  {activeVoiceLabel && (
+                    <p className="truncate text-[10px] text-stone-400">
+                      {activeVoiceLabel}
+                    </p>
+                  )}
+
+                  {/* No-mic simulation */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-2.5">
+                    <span className="inline-flex items-center gap-1 text-[11px] text-stone-400">
+                      <Wand2 className="h-3 w-3" />
+                      {speechSupported ? "Kiểm thử nhanh:" : "Không có micro — giả lập:"}
+                    </span>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => simulateAttempt("good")}
+                        className="rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-white/25 cursor-pointer"
+                      >
+                        Đọc chuẩn (100%)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => simulateAttempt("partial")}
+                        className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-medium text-stone-300 hover:bg-white/20 cursor-pointer"
+                      >
+                        Thiếu chữ (~60%)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Floating Glassmorphism Control Bar (Mic, Camera, CC, Settings, Red End) ── */}
+            <div className="flex items-center gap-2 rounded-full border border-white/20 bg-white/12 px-3 py-2 shadow-2xl backdrop-blur-2xl sm:gap-2.5 sm:px-4">
+              {/* Mic button (toggle mute during call, or speak immediately if idle) */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isCallActive) {
+                    retryListening();
+                  } else if (callState === "idle" && !isMuted) {
+                    retryListening();
+                  } else {
+                    toggleMute();
+                  }
+                }}
+                title={isMuted ? "Bật Mic" : "Tắt Mic / Thu âm"}
+                className={`flex h-11 w-11 items-center justify-center rounded-full transition-all cursor-pointer ${
+                  isMuted
+                    ? "bg-white/10 text-red-300 ring-1 ring-red-400/40 hover:bg-white/20"
+                    : callState === "listening"
+                      ? "bg-[#F26B5B] text-white shadow-[0_0_20px_rgba(242,107,91,0.55)]"
+                      : "bg-white/15 text-white hover:bg-white/25"
+                }`}
+              >
+                {isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+              </button>
+
+              {/* Camera PiP toggle */}
+              <button
+                type="button"
+                onClick={toggleCamera}
+                title={isCameraOn ? "Tắt Camera" : "Bật Camera (PiP)"}
+                className={`flex h-11 w-11 items-center justify-center rounded-full transition-all cursor-pointer ${
+                  isCameraOn
+                    ? "bg-[#F26B5B] text-white shadow-[0_0_16px_rgba(242,107,91,0.45)]"
+                    : "bg-white/15 text-white hover:bg-white/25"
+                }`}
+              >
+                {isCameraOn ? (
+                  <Camera className="h-5 w-5" />
+                ) : (
+                  <CameraOff className="h-5 w-5" />
+                )}
+              </button>
+
+              {/* CC (Live Captions) toggle */}
+              <button
+                type="button"
+                onClick={() => setShowCaptions((v) => !v)}
+                title={showCaptions ? "Ẩn phụ đề trực tiếp (CC)" : "Hiện phụ đề trực tiếp (CC)"}
+                className={`flex h-11 w-11 items-center justify-center rounded-full transition-all cursor-pointer ${
+                  showCaptions
+                    ? "bg-[#F26B5B] text-white shadow-[0_0_16px_rgba(242,107,91,0.45)]"
+                    : "bg-white/15 text-white hover:bg-white/25"
+                }`}
+              >
+                <Captions className="h-5 w-5" />
+              </button>
+
+              {/* Settings toggle */}
+              <button
+                type="button"
+                onClick={() => setShowSettings((v) => !v)}
+                title="Cài đặt cuộc gọi"
+                className={`flex h-11 w-11 items-center justify-center rounded-full transition-all cursor-pointer ${
+                  showSettings
+                    ? "bg-[#F26B5B] text-white"
+                    : "bg-white/15 text-white hover:bg-white/25"
+                }`}
+              >
+                <Settings className="h-5 w-5" />
+              </button>
+
+              <div className="mx-0.5 h-6 w-px bg-white/15" />
+
+              {/* Start Call (brand coral) / Red End Call */}
+              {isCallActive ? (
+                <button
+                  type="button"
+                  onClick={handleEndCall}
+                  title="Kết thúc cuộc gọi"
+                  className="inline-flex h-11 items-center gap-2 rounded-full bg-red-600 px-5 text-sm font-semibold text-white shadow-lg shadow-red-600/30 transition-colors hover:bg-red-700 cursor-pointer"
+                >
+                  <PhoneOff className="h-4 w-4" />
+                  <span className="hidden sm:inline">Kết thúc</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={startCall}
+                  title="Bắt đầu gọi BaoBao"
+                  className="inline-flex h-11 items-center gap-2 rounded-full bg-[#F26B5B] px-5 text-sm font-semibold text-white shadow-lg shadow-[#F26B5B]/35 transition-colors hover:bg-[#E05646] cursor-pointer"
+                >
+                  <Phone className="h-4 w-4" />
+                  <span>Gọi BaoBao</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ─── Below-stage: Tip & Detailed Pronunciation Heatmap + Phoneme Coaching ─── */}
+        {currentPrompt && (
+          <div className="flex items-start gap-2 rounded-2xl border border-[#E5E5E0] bg-white px-4 py-3 text-xs text-[#57534E]">
+            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-[#F26B5B]" />
+            <div>
+              <span className="font-semibold text-[#262626]">Mẹo phát âm: </span>
+              {currentPrompt.tipVi}
+            </div>
           </div>
         )}
 
-        {/* Pronunciation Feedback Card — cleanly BELOW Subtitle */}
-        {evaluation && (
-          <div className="space-y-3.5 rounded-2xl border border-[#E5E5E0] bg-white p-5">
-            <div className="flex items-center justify-between gap-3">
+        {evaluation && charHeatmap && (
+          <div className="space-y-3 rounded-2xl border border-[#E5E5E0] bg-white p-4 sm:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="flex items-center gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-[#737373]">
-                    Kết quả phát âm &amp; thanh điệu
-                  </p>
-                  {evaluation.passed && (
-                    <span className="rounded-full bg-[#F0FDF4] px-2 py-0.5 text-[10px] font-semibold text-[#15803D]">
-                      +10 XP
-                    </span>
-                  )}
-                </div>
-                <p className="mt-0.5 text-sm font-medium text-[#262626]">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
+                  Bản đồ phát âm từng chữ Hán (Heatmap)
+                </p>
+                <p className="mt-0.5 text-sm font-semibold text-[#262626]">
                   {evaluation.encouragementZh}
                 </p>
               </div>
-              <div
-                className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border font-display text-lg font-bold ${
+              <span
+                className={`rounded-xl border px-3 py-1 font-display text-sm font-bold ${
                   evaluation.accuracy >= 85
                     ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D]"
                     : evaluation.accuracy >= 55
@@ -594,70 +811,35 @@ export function LiveVoiceCall({
                 }`}
               >
                 {evaluation.accuracy}%
-              </div>
+              </span>
             </div>
 
-            {/* Word-Level Pronunciation Heatmap */}
-            {charHeatmap && (
-              <div className="space-y-2.5 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-3.5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
-                    Bản đồ phát âm từng chữ Hán (Heatmap)
-                  </span>
-                  <div className="flex items-center gap-3 text-[11px] font-medium">
-                    <span className="inline-flex items-center gap-1 text-[#15803D]">
-                      <span className="h-2 w-2 rounded-full bg-[#15803D]" />
-                      Chuẩn thanh điệu
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-[#B91C1C]">
-                      <span className="h-2 w-2 rounded-full bg-[#B91C1C]" />
-                      Cần luyện lại
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-1.5">
-                  {charHeatmap.map((item) => (
-                    <span
-                      key={item.key}
-                      className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-sm font-bold ${
-                        item.hit
-                          ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D]"
-                          : "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]"
-                      }`}
-                    >
-                      <span>{item.ch}</span>
-                      <span className="text-[10px] font-semibold opacity-75">
-                        {item.hit ? "✓" : "✕"}
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Persona Feedback */}
-            <p className="text-sm leading-relaxed text-[#262626]">
-              {evaluation.feedbackVi}
-            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {charHeatmap.map((item) => (
+                <span
+                  key={item.key}
+                  className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-sm font-bold ${
+                    item.hit
+                      ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D]"
+                      : "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C]"
+                  }`}
+                >
+                  <span>{item.ch}</span>
+                  <span className="text-[10px] opacity-75">{item.hit ? "✓" : "✕"}</span>
+                </span>
+              ))}
+            </div>
 
             {/* Expandable Chinese Phoneme Coaching */}
             <div className="border-t border-[#E5E5E0] pt-3">
               <button
                 type="button"
                 onClick={() => setShowPhonemeCoaching((prev) => !prev)}
-                className="flex w-full items-center justify-between gap-2 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-3.5 py-2.5 text-left transition-colors hover:border-[#6B655E] hover:bg-[#F2F2F0] cursor-pointer"
+                className="flex w-full items-center justify-between gap-2 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-3.5 py-2 text-left text-xs font-semibold text-[#262626] transition-colors hover:border-[#F26B5B]/50 cursor-pointer"
               >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-semibold text-[#262626]">
-                    Huấn luyện phát âm tiếng Trung (zh/ch/sh/r, j/q/x, z/c/s, biến điệu thanh 3)
-                  </span>
-                  {evaluation.detectedPhonemes.length > 0 && (
-                    <span className="rounded-full border border-[#FDE68A] bg-[#FFFBEB] px-2 py-0.5 text-[10px] font-semibold text-[#B45309]">
-                      {evaluation.detectedPhonemes.length} âm cần chú ý
-                    </span>
-                  )}
-                </div>
+                <span>
+                  Huấn luyện phát âm tiếng Trung (zh/ch/sh/r, j/q/x, z/c/s, biến điệu thanh 3)
+                </span>
                 {showPhonemeCoaching ? (
                   <ChevronUp className="h-4 w-4 shrink-0 text-[#6B655E]" />
                 ) : (
@@ -666,173 +848,45 @@ export function LiveVoiceCall({
               </button>
 
               {showPhonemeCoaching && (
-                <div className="mt-2.5 space-y-2.5">
-                  {evaluation.detectedPhonemes.length > 0 && (
-                    <div className="space-y-1.5">
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-[#B45309]">
-                        Ưu tiên chỉnh trong câu này
-                      </p>
-                      {evaluation.detectedPhonemes.map((tip) => (
-                        <div
-                          key={tip.phoneme}
-                          className="rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-xs"
-                        >
-                          <span className="font-bold text-[#92400E]">
-                            [{tip.phoneme}] {tip.labelVi}:{" "}
+                <div className="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {sentencePhonemes.map((guide) => (
+                    <div
+                      key={guide.id}
+                      className={`rounded-xl border p-3 text-xs ${
+                        guide.inSentence
+                          ? "border-[#F26B5B]/40 bg-white"
+                          : "border-[#E5E5E0] bg-[#FAF9F7]"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1.5 font-bold text-[#292524]">
+                          <span className="rounded-md bg-[#292524] px-1.5 py-0.5 font-mono text-[11px] text-white">
+                            {guide.symbol}
                           </span>
-                          <span className="text-[#4A4540]">{tip.tipVi}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {sentencePhonemes.map((guide) => (
-                      <div
-                        key={guide.id}
-                        className={`rounded-xl border p-3 text-xs ${
-                          guide.inSentence
-                            ? "border-[#6B655E]/40 bg-white"
-                            : "border-[#E5E5E0] bg-[#FAF9F7]"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="inline-flex items-center gap-1.5 font-bold text-[#292524]">
-                            <span className="rounded-md bg-[#292524] px-1.5 py-0.5 font-mono text-[11px] text-white">
-                              {guide.symbol}
-                            </span>
-                            <span>{guide.labelVi}</span>
+                          <span>{guide.labelVi}</span>
+                        </span>
+                        {guide.inSentence && (
+                          <span className="shrink-0 rounded-full bg-[#F26B5B]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#E05646]">
+                            Có trong câu
                           </span>
-                          {guide.inSentence && (
-                            <span className="shrink-0 rounded-full bg-[#F0FDF4] px-1.5 py-0.5 text-[10px] font-semibold text-[#15803D]">
-                              Có trong câu
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-1.5 leading-relaxed text-[#57534E]">
-                          {guide.tipVi}
-                        </p>
-                        <p className="mt-1 text-[11px] text-[#737373]">
-                          Ví dụ:{" "}
-                          <span className="font-medium text-[#262626]">
-                            {guide.examples}
-                          </span>
-                        </p>
+                        )}
                       </div>
-                    ))}
-                  </div>
+                      <p className="mt-1.5 leading-relaxed text-[#57534E]">
+                        {guide.tipVi}
+                      </p>
+                      <p className="mt-1 text-[11px] text-[#737373]">
+                        Ví dụ:{" "}
+                        <span className="font-medium text-[#262626]">
+                          {guide.examples}
+                        </span>
+                      </p>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
           </div>
         )}
-
-        {/* Call Controls Bar */}
-        <div className="flex flex-wrap items-center justify-center gap-2.5 rounded-2xl border border-[#E5E5E0] bg-white p-4">
-          {/* Start / End Call */}
-          <button
-            type="button"
-            onClick={handleToggleCall}
-            className={`inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-colors cursor-pointer ${
-              isCallActive
-                ? "bg-[#B91C1C] text-white hover:bg-[#991B1B]"
-                : "bg-[#292524] text-white hover:bg-[#4A4540]"
-            }`}
-          >
-            {isCallActive ? (
-              <>
-                <PhoneOff className="h-4 w-4" />
-                <span>Ngắt cuộc gọi</span>
-              </>
-            ) : (
-              <>
-                <Phone className="h-4 w-4" />
-                <span>Bắt đầu cuộc gọi</span>
-              </>
-            )}
-          </button>
-
-          {/* Prominent Manual Fallback: Thu âm lại (retryListening) */}
-          <button
-            type="button"
-            onClick={retryListening}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-[#6B655E] px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#4A4540] cursor-pointer"
-          >
-            <Mic className="h-4 w-4" />
-            <span>Thu âm lại / Nói ngay</span>
-          </button>
-
-          {/* Mute / Unmute Mic */}
-          <button
-            type="button"
-            onClick={toggleMute}
-            disabled={!isCallActive}
-            className={`inline-flex items-center gap-1.5 rounded-xl border px-4 py-2.5 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-45 ${
-              isMuted
-                ? "border-[#292524] bg-[#292524] text-white"
-                : "border-[#E5E5E0] bg-[#FAF9F7] text-[#262626] hover:border-[#6B655E] hover:bg-[#F2F2F0]"
-            }`}
-          >
-            {isMuted ? (
-              <>
-                <MicOff className="h-4 w-4" />
-                <span>Bật Mic</span>
-              </>
-            ) : (
-              <>
-                <Mic className="h-4 w-4" />
-                <span>Tắt Mic</span>
-              </>
-            )}
-          </button>
-
-          {/* Replay current model sentence */}
-          <button
-            type="button"
-            onClick={replayModel}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-[#E5E5E0] bg-white px-3.5 py-2.5 text-xs font-semibold text-[#262626] transition-colors hover:border-[#6B655E] hover:bg-[#F2F2F0] cursor-pointer"
-          >
-            <RotateCcw className="h-4 w-4 text-[#6B655E]" />
-            <span>Nghe lại mẫu</span>
-          </button>
-
-          {/* Next sentence */}
-          <button
-            type="button"
-            onClick={nextPrompt}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-[#E5E5E0] bg-white px-3.5 py-2.5 text-xs font-semibold text-[#262626] transition-colors hover:border-[#6B655E] hover:bg-[#F2F2F0] cursor-pointer"
-          >
-            <span>Câu tiếp</span>
-            <SkipForward className="h-4 w-4 text-[#6B655E]" />
-          </button>
-        </div>
-
-        {/* Simulation Controls for devices without Microphone */}
-        <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-[#E5E5E0] bg-white p-4">
-          <div className="flex items-center gap-2 text-xs text-[#6B655E]">
-            <Wand2 className="h-4 w-4 shrink-0" />
-            <span>
-              Chế độ giả lập cho thiết bị không có Micro (kiểm thử phản hồi của
-              Minh Long / Bảo Linh):
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => simulateAttempt("good")}
-              className="rounded-xl bg-[#292524] px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#4A4540] cursor-pointer"
-            >
-              Giả lập câu đọc chuẩn (100%)
-            </button>
-            <button
-              type="button"
-              onClick={() => simulateAttempt("partial")}
-              className="rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-3.5 py-2 text-xs font-semibold text-[#4A4540] transition-colors hover:border-[#6B655E] hover:bg-[#F2F2F0] cursor-pointer"
-            >
-              Giả lập đọc thiếu chữ (~60%)
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
