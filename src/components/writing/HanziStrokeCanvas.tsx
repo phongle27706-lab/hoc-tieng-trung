@@ -177,6 +177,51 @@ function classifyStrokeFromPoints(points: [number, number][]): {
   };
 }
 
+const COMMON_CHAR_META: Record<
+  string,
+  {
+    pinyin: string;
+    meaningVi: string;
+    radical: string;
+    level: HSKLevel;
+    subDifficulty: SubDifficulty;
+  }
+> = {
+  永: {
+    pinyin: "yǒng",
+    meaningVi: "vĩnh cửu, mãi mãi",
+    radical: "水 (Thủy)",
+    level: "HSK0",
+    subDifficulty: "basic",
+  },
+  爱: {
+    pinyin: "ài",
+    meaningVi: "yêu, tình yêu",
+    radical: "爫 (Trảo)",
+    level: "HSK1",
+    subDifficulty: "basic",
+  },
+  情: {
+    pinyin: "qíng",
+    meaningVi: "tình cảm, cảm xúc",
+    radical: "忄 (Tâm)",
+    level: "HSK3",
+    subDifficulty: "basic",
+  },
+};
+
+function cleanPinyin(val?: string): string {
+  const t = val?.trim() ?? "";
+  if (!t || t === "hàn zì") return "";
+  return t;
+}
+
+function cleanMeaning(val?: string): string {
+  const t = val?.trim() ?? "";
+  if (!t || t.startsWith("Tra cứu") || t === "Chữ Hán luyện viết") return "";
+  return t;
+}
+
 function resolveCharMetadata(
   char: string,
   pinyinHint?: string,
@@ -192,31 +237,44 @@ function resolveCharMetadata(
     ? writingModule.HANZI_STROKE_BANK.find((item) => item.hanzi === char)
     : undefined;
   const builtin = BUILTIN_TEMPLATES[char];
+  const common = COMMON_CHAR_META[char];
   const dictEntry = lookupChineseSync(char);
 
-  const dictPinyin =
-    dictEntry.pinyin && dictEntry.pinyin !== "hàn zì" ? dictEntry.pinyin : "";
-  const dictMeaning =
-    dictEntry.meaningVi && !dictEntry.meaningVi.startsWith("Tra cứu")
-      ? dictEntry.meaningVi
-      : "";
+  const dictPinyin = cleanPinyin(dictEntry.pinyin);
+  const dictMeaning = cleanMeaning(dictEntry.meaningVi);
 
   return {
     pinyin:
-      pinyinHint ||
-      bankMatch?.pinyin ||
-      builtin?.pinyin ||
-      dictPinyin ||
-      "hàn zì",
+      cleanPinyin(pinyinHint) ||
+      cleanPinyin(bankMatch?.pinyin) ||
+      cleanPinyin(builtin?.pinyin) ||
+      cleanPinyin(common?.pinyin) ||
+      dictPinyin,
     meaningVi:
-      meaningHint ||
-      bankMatch?.meaningVi ||
-      builtin?.meaningVi ||
+      cleanMeaning(meaningHint) ||
+      cleanMeaning(bankMatch?.meaningVi) ||
+      cleanMeaning(builtin?.meaningVi) ||
+      cleanMeaning(common?.meaningVi) ||
       dictMeaning ||
       `Chữ Hán "${char}"`,
-    radical: bankMatch?.radical || builtin?.radical || `Chữ ${char}`,
-    level: bankMatch?.level || builtin?.level || dictEntry.level || "HSK1",
-    subDifficulty: bankMatch?.subDifficulty || builtin?.subDifficulty || "basic",
+    radical:
+      bankMatch?.radical ||
+      builtin?.radical ||
+      common?.radical ||
+      (dictEntry.radical && dictEntry.radical !== "Bộ thủ cơ bản"
+        ? dictEntry.radical
+        : `Chữ ${char}`),
+    level:
+      bankMatch?.level ||
+      builtin?.level ||
+      common?.level ||
+      dictEntry.level ||
+      "HSK1",
+    subDifficulty:
+      bankMatch?.subDifficulty ||
+      builtin?.subDifficulty ||
+      common?.subDifficulty ||
+      "basic",
   };
 }
 
@@ -428,85 +486,32 @@ const BUILTIN_TEMPLATES: Record<string, HanziStrokeTemplateFallback> = {
   },
 };
 
-function generateFallbackTemplate(
+function getExactLocalTemplate(
   char: string,
   pinyinHint?: string,
   meaningHint?: string
-): HanziStrokeTemplateFallback {
-  if (BUILTIN_TEMPLATES[char]) {
-    const t = BUILTIN_TEMPLATES[char];
+): HanziStrokeTemplateFallback | null {
+  const bankMatch = Array.isArray(writingModule.HANZI_STROKE_BANK)
+    ? writingModule.HANZI_STROKE_BANK.find((item) => item.hanzi === char)
+    : undefined;
+  if (bankMatch && Array.isArray(bankMatch.strokes) && bankMatch.strokes.length > 0) {
+    const meta = resolveCharMetadata(char, pinyinHint, meaningHint);
     return {
-      ...t,
-      pinyin: pinyinHint || t.pinyin,
-      meaningVi: meaningHint || t.meaningVi,
+      ...bankMatch,
+      ...meta,
     };
   }
 
-  // Deterministic realistic stroke sequence based on Unicode code point
-  const code = char.charCodeAt(0) || 20013;
-  const standardStrokesPool: StrokeDescriptor[] = [
-    {
-      nameVi: "Nét Ngang trên (上横 - Héng)",
-      ruleVi: "Trên trước dưới sau, trái sang phải.",
-      points: [[22, 24], [50, 23], [78, 22]],
-    },
-    {
-      nameVi: "Nét Sổ trục (中竖 - Shù)",
-      ruleVi: "Ngang trước Sổ sau, kéo thẳng từ trên xuống dưới.",
-      points: [[48, 20], [48, 50], [48, 78]],
-    },
-    {
-      nameVi: "Nét Phẩy trái (左撇 - Piě)",
-      ruleVi: "Phẩy trước Mác sau, kéo chếch xuống góc trái dưới.",
-      points: [[50, 32], [35, 56], [20, 78]],
-    },
-    {
-      nameVi: "Nét Mác phải (右捺 - Nà)",
-      ruleVi: "Phẩy trước Mác sau, kéo chếch xuống góc phải dưới.",
-      points: [[50, 38], [66, 58], [82, 78]],
-    },
-    {
-      nameVi: "Nét Ngang đáy (底横 - Héng)",
-      ruleVi: "Đóng nét ngang đáy cuối cùng từ trái sang phải.",
-      points: [[18, 82], [50, 81], [84, 80]],
-    },
-  ];
-
-  const count = 3 + (code % 3); // 3 to 5 strokes for clean interactive practice
-  return {
-    hanzi: char,
-    pinyin: pinyinHint || "hàn zì",
-    meaningVi: meaningHint || `Chữ Hán "${char}"`,
-    radical: "一 (Bộ thủ chuẩn)",
-    level: "HSK1",
-    subDifficulty: "basic",
-    strokes: standardStrokesPool.slice(0, count),
-  };
-}
-
-function getTemplateSafely(
-  char: string,
-  pinyinHint?: string,
-  meaningHint?: string
-): HanziStrokeTemplateFallback {
-  const mod = writingModule as unknown as {
-    getStrokeTemplateForChar?: (c: string) => HanziStrokeTemplateFallback;
-  };
-  if (typeof mod.getStrokeTemplateForChar === "function") {
-    try {
-      const tpl = mod.getStrokeTemplateForChar(char);
-      if (tpl && Array.isArray(tpl.strokes) && tpl.strokes.length > 0) {
-        return {
-          ...tpl,
-          pinyin: pinyinHint || tpl.pinyin,
-          meaningVi: meaningHint || tpl.meaningVi,
-        };
-      }
-    } catch {
-      // Fallback below
-    }
+  const builtin = BUILTIN_TEMPLATES[char];
+  if (builtin && builtin.strokes.length > 0) {
+    const meta = resolveCharMetadata(char, pinyinHint, meaningHint);
+    return {
+      ...builtin,
+      ...meta,
+    };
   }
-  return generateFallbackTemplate(char, pinyinHint, meaningHint);
+
+  return null;
 }
 
 function dist(a: [number, number], b: [number, number]): number {
@@ -634,6 +639,7 @@ export function HanziStrokeCanvas({
   const [isLoadingData, setIsLoadingData] = useState<boolean>(
     () => !hanziDataCache.has(activeChar)
   );
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     const cached = hanziDataCache.get(activeChar);
@@ -647,46 +653,77 @@ export function HanziStrokeCanvas({
     setIsLoadingData(true);
     setHanziData(null);
 
-    fetch(
-      `https://cdn.jsdelivr.net/npm/hanzi-writer-data@2.0/${encodeURIComponent(
-        activeChar
-      )}.json`
-    )
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json() as Promise<HanziWriterCharData>;
-      })
-      .then((data) => {
-        if (
-          !cancelled &&
-          data &&
-          Array.isArray(data.medians) &&
-          data.medians.length > 0
-        ) {
-          hanziDataCache.set(activeChar, data);
-          setHanziData(data);
+    const isValidStrokeData = (
+      data: unknown
+    ): data is HanziWriterCharData =>
+      Boolean(
+        data &&
+          typeof data === "object" &&
+          Array.isArray((data as HanziWriterCharData).medians) &&
+          (data as HanziWriterCharData).medians.length > 0
+      );
+
+    const loadStrokeData = async () => {
+      const encoded = encodeURIComponent(activeChar);
+      const endpoints = [
+        `/api/hanzi-stroke?char=${encoded}`,
+        `https://cdn.jsdelivr.net/npm/hanzi-writer-data@2.0/${encoded}.json`,
+      ];
+
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) continue;
+          const data: unknown = await res.json();
+          if (isValidStrokeData(data)) {
+            if (!cancelled) {
+              hanziDataCache.set(activeChar, data);
+              setHanziData(data);
+            }
+            return;
+          }
+        } catch {
+          // Try next endpoint
         }
-      })
-      .catch(() => {
-        // Fallback to local template if CDN is unreachable
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsLoadingData(false);
-        }
-      });
+      }
+    };
+
+    loadStrokeData().finally(() => {
+      if (!cancelled) {
+        setIsLoadingData(false);
+      }
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [activeChar]);
+  }, [activeChar, retryNonce]);
 
-  const template = useMemo(() => {
+  const charPinyinHint = chars.length === 1 ? pinyin : undefined;
+  const charMeaningHint = chars.length === 1 ? meaningVi : undefined;
+
+  const charMeta = useMemo(
+    () => resolveCharMetadata(activeChar, charPinyinHint, charMeaningHint),
+    [activeChar, charPinyinHint, charMeaningHint]
+  );
+
+  const template = useMemo<HanziStrokeTemplateFallback | null>(() => {
     if (hanziData) {
-      return buildTemplateFromHanziData(activeChar, hanziData, pinyin, meaningVi);
+      return buildTemplateFromHanziData(
+        activeChar,
+        hanziData,
+        charPinyinHint,
+        charMeaningHint
+      );
     }
-    return getTemplateSafely(activeChar, pinyin, meaningVi);
-  }, [activeChar, hanziData, pinyin, meaningVi]);
+    if (isLoadingData) {
+      return null;
+    }
+    return getExactLocalTemplate(activeChar, charPinyinHint, charMeaningHint);
+  }, [activeChar, hanziData, isLoadingData, charPinyinHint, charMeaningHint]);
+
+  const strokes = useMemo(() => template?.strokes ?? [], [template]);
+  const isDataUnavailable = !isLoadingData && strokes.length === 0;
 
   const [currentStrokeIdx, setCurrentStrokeIdx] = useState(0);
   const [completedUserStrokes, setCompletedUserStrokes] = useState<
@@ -708,7 +745,7 @@ export function HanziStrokeCanvas({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animTimerRef = useRef<number | null>(null);
 
-  const totalStrokes = template.strokes.length;
+  const totalStrokes = strokes.length;
 
   // Reset state when activeChar changes
   useEffect(() => {
@@ -803,33 +840,62 @@ export function HanziStrokeCanvas({
       ctx.restore();
     };
 
-    // 4. Subtle background guide of all template strokes
-    template.strokes.forEach((s) => {
-      drawPolyline(s.points, "rgba(107, 101, 94, 0.16)", 14);
-    });
+    const drawSvgStroke = (svgPath: string, fillColor: string) => {
+      if (typeof Path2D === "undefined") return false;
+      try {
+        ctx.save();
+        const scale = CANVAS_SIZE / 1024;
+        ctx.translate(0, 900 * scale);
+        ctx.scale(scale, -scale);
+        ctx.fillStyle = fillColor;
+        ctx.fill(new Path2D(svgPath));
+        ctx.restore();
+        return true;
+      } catch {
+        return false;
+      }
+    };
 
-    // 5. Completed strokes in rich sumi ink / emerald accent
+    const svgStrokes = hanziData?.strokes;
+
+    // 4. Subtle background guide of all template strokes
+    if (svgStrokes && svgStrokes.length > 0) {
+      svgStrokes.forEach((svgPath, idx) => {
+        if (!drawSvgStroke(svgPath, "rgba(107, 101, 94, 0.16)")) {
+          const fallbackPts = strokes[idx]?.points;
+          if (fallbackPts) drawPolyline(fallbackPts, "rgba(107, 101, 94, 0.16)", 14);
+        }
+      });
+    } else {
+      strokes.forEach((s) => {
+        drawPolyline(s.points, "rgba(107, 101, 94, 0.16)", 14);
+      });
+    }
+
+    // 5. Completed strokes in rich sumi ink
     completedUserStrokes.forEach((pts, idx) => {
-      const templatePts = template.strokes[idx]?.points ?? pts;
-      // Snap display gently toward clean calligraphy while preserving user feel
-      drawPolyline(templatePts, "#262626", 13);
+      const svgPath = svgStrokes?.[idx];
+      if (!svgPath || !drawSvgStroke(svgPath, "#262626")) {
+        const templatePts = strokes[idx]?.points ?? pts;
+        drawPolyline(templatePts, "#262626", 13);
+      }
     });
 
     // 6. Demo animation stroke highlight
-    if (animatingStrokeIdx !== null && template.strokes[animatingStrokeIdx]) {
+    if (animatingStrokeIdx !== null && strokes[animatingStrokeIdx]) {
       for (let i = 0; i <= animatingStrokeIdx; i++) {
-        const s = template.strokes[i];
+        const s = strokes[i];
         if (!s) continue;
-        drawPolyline(
-          s.points,
-          i === animatingStrokeIdx ? "#15803D" : "#262626",
-          13
-        );
+        const color = i === animatingStrokeIdx ? "#15803D" : "#262626";
+        const svgPath = svgStrokes?.[i];
+        if (!svgPath || !drawSvgStroke(svgPath, color)) {
+          drawPolyline(s.points, color, 13);
+        }
       }
     }
 
     // 7. Current target stroke guide (if hint or error active)
-    const targetStroke = template.strokes[currentStrokeIdx];
+    const targetStroke = strokes[currentStrokeIdx];
     if (targetStroke && !charCompleted && (showHintPulse || errorFeedback)) {
       drawPolyline(targetStroke.points, "#D97706", 5, true);
 
@@ -876,7 +942,8 @@ export function HanziStrokeCanvas({
       drawPolyline(activeDragPoints, "#15803D", 10);
     }
   }, [
-    template,
+    hanziData,
+    strokes,
     completedUserStrokes,
     currentStrokeIdx,
     activeDragPoints,
@@ -936,7 +1003,7 @@ export function HanziStrokeCanvas({
     if (!isDrawing) return;
     setIsDrawing(false);
 
-    const targetStroke = template.strokes[currentStrokeIdx];
+    const targetStroke = strokes[currentStrokeIdx];
     if (!targetStroke) {
       setActiveDragPoints([]);
       return;
@@ -945,7 +1012,7 @@ export function HanziStrokeCanvas({
     const evaluation = evaluateStroke(
       activeDragPoints,
       targetStroke,
-      template.strokes,
+      strokes,
       currentStrokeIdx
     );
 
@@ -977,6 +1044,7 @@ export function HanziStrokeCanvas({
   };
 
   const handlePlayAnimation = () => {
+    if (totalStrokes === 0) return;
     if (animTimerRef.current) {
       window.clearInterval(animTimerRef.current);
       animTimerRef.current = null;
@@ -999,11 +1067,12 @@ export function HanziStrokeCanvas({
   };
 
   const handleAutoCompleteDemo = () => {
+    if (totalStrokes === 0) return;
     if (animTimerRef.current) {
       window.clearInterval(animTimerRef.current);
       animTimerRef.current = null;
     }
-    setCompletedUserStrokes(template.strokes.map((s) => s.points));
+    setCompletedUserStrokes(strokes.map((s) => s.points));
     setCurrentStrokeIdx(totalStrokes);
     finishChar(100);
   };
@@ -1018,7 +1087,10 @@ export function HanziStrokeCanvas({
     setAnimatingStrokeIdx(null);
   };
 
-  const currentStroke = template.strokes[currentStrokeIdx];
+  const currentStroke = strokes[currentStrokeIdx];
+  const displayMeta = template ?? charMeta;
+  const displayPinyin = displayMeta.pinyin;
+  const displayMeaning = displayMeta.meaningVi;
 
   return (
     <div className="rounded-2xl border border-[#E5E5E0] bg-white p-5 sm:p-6 shadow-xs">
@@ -1074,10 +1146,31 @@ export function HanziStrokeCanvas({
             </div>
 
             {isLoadingData && (
-              <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-white/75 backdrop-blur-[1px]">
+              <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-white/80 backdrop-blur-[1px]">
                 <div className="rounded-xl border border-[#E5E5E0] bg-white px-3.5 py-2 text-xs font-medium text-[#4A4540] shadow-sm">
-                  Đang tải nét chữ...
+                  Đang tải dữ liệu nét chữ...
                 </div>
+              </div>
+            )}
+
+            {isDataUnavailable && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-2xl bg-white/90 px-6 text-center backdrop-blur-[1px]">
+                <AlertTriangle className="h-6 w-6 text-[#D97706]" />
+                <p className="text-xs font-semibold text-[#262626]">
+                  Chưa có dữ liệu nét chữ cho &ldquo;{activeChar}&rdquo;
+                </p>
+                <p className="text-[11px] text-[#737373]">
+                  Hệ thống không tạo nét giả. Bạn có thể thử tải lại hoặc chọn chữ Hán khác.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRetryNonce((n) => n + 1)}
+                  className="mt-1 gap-1.5"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Thử tải lại
+                </Button>
               </div>
             )}
 
@@ -1093,10 +1186,18 @@ export function HanziStrokeCanvas({
           </div>
 
           <p className="mt-2.5 text-center text-xs text-[#737373]">
-            Dùng chuột hoặc ngón tay kéo theo thứ tự nét từ chấm tròn số{" "}
-            <strong className="text-[#D97706]">
-              {Math.min(currentStrokeIdx + 1, totalStrokes)}
-            </strong>
+            {isDataUnavailable ? (
+              "Chữ Hán này hiện chưa có dữ liệu thứ tự nét."
+            ) : isLoadingData ? (
+              "Đang chuẩn bị dữ liệu nét bút thuận..."
+            ) : (
+              <>
+                Dùng chuột hoặc ngón tay kéo theo thứ tự nét từ chấm tròn số{" "}
+                <strong className="text-[#D97706]">
+                  {Math.min(currentStrokeIdx + 1, totalStrokes)}
+                </strong>
+              </>
+            )}
           </p>
         </div>
 
@@ -1109,24 +1210,33 @@ export function HanziStrokeCanvas({
                 <span className="text-3xl font-bold text-[#262626]">
                   {activeChar}
                 </span>
-                <span className="font-mono text-base font-semibold text-[#6B655E]">
-                  [{pinyin || template.pinyin}]
-                </span>
-                <Badge variant="accent">{template.level}</Badge>
+                {displayPinyin && (
+                  <span className="font-mono text-base font-semibold text-[#6B655E]">
+                    [{displayPinyin}]
+                  </span>
+                )}
+                <Badge variant="accent">{displayMeta.level}</Badge>
               </div>
 
               <div className="flex flex-wrap items-center gap-1.5 text-xs">
                 <span className="rounded-lg border border-[#E5E5E0] bg-[#FAF9F7] px-2.5 py-1 font-medium text-[#262626]">
-                  Bộ thủ: <strong>{template.radical}</strong>
+                  Bộ thủ: <strong>{displayMeta.radical}</strong>
                 </span>
                 <span className="rounded-lg border border-[#E5E5E0] bg-[#FAF9F7] px-2.5 py-1 font-medium text-[#262626]">
-                  Tổng số nét: <strong>{totalStrokes} nét</strong>
+                  Tổng số nét:{" "}
+                  <strong>
+                    {isLoadingData
+                      ? "..."
+                      : totalStrokes > 0
+                        ? `${totalStrokes} nét`
+                        : "Chưa có dữ liệu"}
+                  </strong>
                 </span>
               </div>
             </div>
 
             <p className="text-sm font-medium text-[#4A4540]">
-              Nghĩa: <strong className="text-[#262626]">{meaningVi || template.meaningVi}</strong>
+              Nghĩa: <strong className="text-[#262626]">{displayMeaning}</strong>
             </p>
 
             {/* Current Stroke Instruction Banner */}
@@ -1210,35 +1320,37 @@ export function HanziStrokeCanvas({
             </AnimatePresence>
 
             {/* All Strokes Progress Pills */}
-            <div className="space-y-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
-                Thứ tự toàn bộ {totalStrokes} nét bút thuận:
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {template.strokes.map((st, idx) => {
-                  const isDone = idx < currentStrokeIdx;
-                  const isCurrent = idx === currentStrokeIdx && !charCompleted;
-                  const isErr = errorFeedback?.strokeIndex === idx;
-                  return (
-                    <span
-                      key={idx}
-                      className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium ${
-                        isErr
-                          ? "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C] font-bold"
-                          : isDone
-                          ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D]"
-                          : isCurrent
-                          ? "border-[#292524] bg-[#292524] text-white font-semibold"
-                          : "border-[#E5E5E0] bg-white text-[#737373]"
-                      }`}
-                    >
-                      <span>#{idx + 1}</span>
-                      <span>{st.nameVi.split("(")[0].trim()}</span>
-                    </span>
-                  );
-                })}
+            {totalStrokes > 0 && (
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
+                  Thứ tự toàn bộ {totalStrokes} nét bút thuận:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {strokes.map((st, idx) => {
+                    const isDone = idx < currentStrokeIdx;
+                    const isCurrent = idx === currentStrokeIdx && !charCompleted;
+                    const isErr = errorFeedback?.strokeIndex === idx;
+                    return (
+                      <span
+                        key={idx}
+                        className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-medium ${
+                          isErr
+                            ? "border-[#FECACA] bg-[#FEF2F2] text-[#B91C1C] font-bold"
+                            : isDone
+                            ? "border-[#BBF7D0] bg-[#F0FDF4] text-[#15803D]"
+                            : isCurrent
+                            ? "border-[#292524] bg-[#292524] text-white font-semibold"
+                            : "border-[#E5E5E0] bg-white text-[#737373]"
+                        }`}
+                      >
+                        <span>#{idx + 1}</span>
+                        <span>{st.nameVi.split("(")[0].trim()}</span>
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Control Buttons */}
@@ -1246,6 +1358,7 @@ export function HanziStrokeCanvas({
             <Button
               variant="outline"
               size="sm"
+              disabled={totalStrokes === 0}
               onClick={handlePlayAnimation}
               className="gap-1.5"
             >
@@ -1256,6 +1369,7 @@ export function HanziStrokeCanvas({
             <Button
               variant="outline"
               size="sm"
+              disabled={totalStrokes === 0}
               onClick={() => setShowHintPulse((v) => !v)}
               className="gap-1.5"
             >
@@ -1275,6 +1389,7 @@ export function HanziStrokeCanvas({
             <Button
               variant="outline"
               size="sm"
+              disabled={totalStrokes === 0}
               onClick={handleReset}
               className="gap-1.5"
             >
@@ -1285,6 +1400,7 @@ export function HanziStrokeCanvas({
             <Button
               variant="secondary"
               size="sm"
+              disabled={totalStrokes === 0}
               onClick={handleAutoCompleteDemo}
               className="gap-1.5 ml-auto"
             >

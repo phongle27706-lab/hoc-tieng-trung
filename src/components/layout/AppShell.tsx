@@ -25,6 +25,8 @@ import {
   Languages,
   FolderOpen,
   ChevronDown,
+  MoreHorizontal,
+  X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "@/components/auth/AuthContext";
@@ -119,6 +121,54 @@ export const SKILL_NAV_ITEMS: NavItem[] = [
 
 const ALL_NAV_ITEMS: NavItem[] = [...PRIMARY_NAV_ITEMS, ...SKILL_NAV_ITEMS];
 
+const MOBILE_MAIN_TABS: NavItem[] = [
+  {
+    href: "/",
+    label: "Tổng quan",
+    shortLabel: "Tổng quan",
+    icon: LayoutDashboard,
+  },
+  {
+    href: "/roadmap",
+    label: "Lộ trình HSK 0 → 7–9",
+    shortLabel: "Lộ trình",
+    icon: Map,
+  },
+  {
+    href: "/vocab",
+    label: "Từ vựng & Mẫu câu",
+    shortLabel: "Từ vựng",
+    icon: BookMarked,
+  },
+  {
+    href: "/ai-tutor",
+    label: "Gia sư AI BaoBao",
+    shortLabel: "BaoBao AI",
+    icon: Bot,
+  },
+];
+
+const MOBILE_MORE_EXTRA_ITEMS: NavItem[] = [
+  {
+    href: "/grammar",
+    label: "Ngữ pháp",
+    shortLabel: "Ngữ pháp",
+    icon: GraduationCap,
+  },
+  {
+    href: "/exams",
+    label: "Thi thử",
+    shortLabel: "Thi thử",
+    icon: ClipboardCheck,
+  },
+  {
+    href: "/library",
+    label: "Thư viện Tài liệu & Video",
+    shortLabel: "Thư viện",
+    icon: FolderOpen,
+  },
+];
+
 function getPageTitle(pathname: string): { title: string; subtitle: string } {
   if (pathname === "/") {
     return { title: "Tổng quan học tập", subtitle: "Quái Vật Tiếng Trung · HSK 0 – 9" };
@@ -152,13 +202,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const isAuthPage = pathname === "/login" || pathname === "/register";
   const isSkillRoute = SKILL_NAV_ITEMS.some((item) => pathname.startsWith(item.href));
+  const isMoreRoute =
+    isSkillRoute ||
+    MOBILE_MORE_EXTRA_ITEMS.some((item) => pathname.startsWith(item.href));
   const [skillsOpen, setSkillsOpen] = useState<boolean>(isSkillRoute);
+  const [moreOpen, setMoreOpen] = useState<boolean>(false);
 
   useEffect(() => {
     if (isSkillRoute) {
       setSkillsOpen(true);
     }
   }, [isSkillRoute]);
+
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     if (isAuthPage) return;
@@ -368,15 +426,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
           </Link>
 
-          <div className="flex items-center justify-between rounded-lg border border-[#E5E5E0] bg-white px-2.5 py-1.5 text-[11px] text-[#6B655E]">
+          <Link
+            href="/vocab?tab=mistakes"
+            className="flex items-center justify-between rounded-lg border border-[#E5E5E0] bg-white px-2.5 py-1.5 text-[11px] text-[#6B655E] transition-colors hover:border-[#6B655E]/50 hover:bg-[#FAF9F7] hover:text-[#292524]"
+          >
             <span className="inline-flex items-center gap-1.5 font-medium">
-              <AlertCircle className="h-3.5 w-3.5 text-[#6B655E]" />
+              <AlertCircle className="h-3.5 w-3.5 text-brand" />
               <span>Lỗi cần ôn</span>
             </span>
             <span className="rounded-full bg-[#F2F2F0] px-2 py-0.5 font-semibold text-[#292524]">
               {mistakeCount}
             </span>
-          </div>
+          </Link>
 
           <div className="grid grid-cols-2 gap-1.5">
             <button
@@ -439,17 +500,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           {/* Compact Status Pills & Account Action */}
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <div className="flex items-center divide-x divide-amber-200 rounded-full border border-amber-200 bg-gami-soft text-xs font-semibold text-amber-900">
               <span
-                className="flex items-center gap-1 px-2.5 py-1"
+                className="flex items-center gap-1 px-2 py-1 sm:px-2.5"
                 title="Chuỗi ngày học liên tiếp"
               >
                 <Flame className="h-3.5 w-3.5 text-orange-500" fill="currentColor" />
                 <span>{progress.streakDays}</span>
               </span>
               <span
-                className="flex items-center gap-1 px-2.5 py-1"
+                className="flex items-center gap-1 px-2 py-1 sm:px-2.5"
                 title="Điểm kinh nghiệm"
               >
                 <Zap className="h-3.5 w-3.5 text-amber-500" fill="currentColor" />
@@ -461,17 +522,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
 
             <span
-              className="inline-flex h-7 items-center rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-2.5 text-xs font-bold text-white shadow-xs"
+              className="inline-flex h-7 items-center whitespace-nowrap rounded-full bg-gradient-to-r from-amber-400 to-orange-500 px-2 text-xs font-bold text-white shadow-xs sm:px-2.5"
               title="Trình độ HSK hiện tại"
             >
-              {progress.level === "HSK0" ? "Mức 0 (HSK0)" : progress.level}
+              {progress.level === "HSK0" ? (
+                <>
+                  <span className="sm:hidden">Mức 0</span>
+                  <span className="hidden sm:inline">Mức 0 (HSK0)</span>
+                </>
+              ) : (
+                progress.level
+              )}
             </span>
 
             {isLoggedInAccount ? (
               <button
                 type="button"
                 onClick={handleLogout}
-                className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-[#E5E5E0] bg-white px-2.5 text-xs font-medium text-[#525252] transition-colors hover:bg-[#F2F2F0] hover:text-[#262626] cursor-pointer md:hidden"
+                className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-[#E5E5E0] bg-white px-2 text-xs font-medium text-[#525252] transition-colors hover:bg-[#F2F2F0] hover:text-[#262626] cursor-pointer sm:px-2.5 md:hidden"
                 title="Đăng xuất"
               >
                 <LogOut className="h-3.5 w-3.5" />
@@ -479,7 +547,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ) : (
               <Link
                 href="/login"
-                className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-semibold text-white transition-colors hover:bg-brand-hover"
+                className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-brand px-2.5 text-xs font-semibold text-white transition-colors hover:bg-brand-hover sm:px-3"
               >
                 <LogIn className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Đăng nhập</span>
@@ -512,20 +580,145 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </footer>
       </div>
 
-      {/* Mobile Bottom Navigation Bar */}
+      {/* Mobile "Thêm" Bottom Drawer / Sheet */}
+      <AnimatePresence>
+        {moreOpen && (
+          <div className="fixed inset-0 z-40 md:hidden">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              onClick={() => setMoreOpen(false)}
+              className="absolute inset-0 bg-[#292524]/45 backdrop-blur-[2px]"
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", stiffness: 380, damping: 34 }}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Menu mở rộng"
+              className="absolute inset-x-0 bottom-0 max-h-[82vh] overflow-y-auto rounded-t-3xl border-t border-[#E5E5E0] bg-white px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+5rem)] shadow-2xl"
+            >
+              <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-[#E5E5E0]" />
+              <div className="flex items-center justify-between pb-3">
+                <h2 className="font-display text-sm font-bold text-[#262626]">
+                  Khám phá thêm
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setMoreOpen(false)}
+                  aria-label="Đóng menu"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F2F2F0] text-[#6B655E] transition-colors hover:text-[#262626] cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* 5 Kỹ năng */}
+              <div className="space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
+                  5 Kỹ năng
+                </p>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {SKILL_NAV_ITEMS.map((item) => {
+                    const Icon = item.icon;
+                    const active = isActive(item.href);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setMoreOpen(false)}
+                        className={`flex flex-col items-center justify-center gap-1 rounded-2xl border px-1 py-2.5 text-[11px] font-medium transition-colors ${
+                          active
+                            ? "border-[#292524] bg-[#292524] text-white"
+                            : "border-[#E5E5E0] bg-[#FAF9F7] text-[#262626] hover:border-[#6B655E]"
+                        }`}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <span className="truncate max-w-full">{item.shortLabel}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Ngữ pháp, Thi thử, Thư viện Tài liệu & Video */}
+              <div className="mt-4 space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#737373]">
+                  Học liệu &amp; Kiểm tra
+                </p>
+                <div className="space-y-1.5">
+                  {MOBILE_MORE_EXTRA_ITEMS.map((item) => {
+                    const Icon = item.icon;
+                    const active = isActive(item.href);
+                    const isLibrary = item.href === "/library";
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => setMoreOpen(false)}
+                        className={`flex items-center gap-3 rounded-2xl border px-3.5 py-3 text-sm font-semibold transition-colors ${
+                          active
+                            ? "border-brand bg-brand-soft text-brand-active"
+                            : isLibrary
+                            ? "border-[#E5E5E0] bg-[#FAF9F7] text-[#262626] hover:border-brand/50"
+                            : "border-[#E5E5E0] bg-white text-[#262626] hover:bg-[#FAF9F7]"
+                        }`}
+                      >
+                        <span
+                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${
+                            active
+                              ? "bg-brand text-white"
+                              : "bg-[#F2F2F0] text-[#292524]"
+                          }`}
+                        >
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <span className="truncate">{item.label}</span>
+                      </Link>
+                    );
+                  })}
+
+                  <Link
+                    href="/vocab?tab=mistakes"
+                    onClick={() => setMoreOpen(false)}
+                    className="flex items-center justify-between rounded-2xl border border-[#E5E5E0] bg-white px-3.5 py-2.5 text-xs font-semibold text-[#262626] transition-colors hover:bg-[#FAF9F7]"
+                  >
+                    <span className="inline-flex items-center gap-2.5">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand">
+                        <AlertCircle className="h-4 w-4" />
+                      </span>
+                      <span>Lỗi cần ôn</span>
+                    </span>
+                    <span className="rounded-full bg-[#F2F2F0] px-2.5 py-0.5 text-xs font-bold text-[#292524]">
+                      {mistakeCount}
+                    </span>
+                  </Link>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Mobile Bottom Navigation Bar — Exactly 5 Main Tabs */}
       <nav
         aria-label="Điều hướng di động"
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-[#E5E5E0] bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-[#E5E5E0] bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
       >
-        <div className="no-scrollbar flex h-15 items-center gap-0.5 overflow-x-auto px-1.5">
-          {ALL_NAV_ITEMS.map((item) => {
+        <div className="grid h-15 grid-cols-5 items-center px-1">
+          {MOBILE_MAIN_TABS.map((item) => {
             const Icon = item.icon;
-            const active = isActive(item.href);
+            const active = !moreOpen && isActive(item.href);
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex min-w-[60px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1.5 py-1 text-[10px] font-medium transition-all duration-200 ${
+                onClick={() => setMoreOpen(false)}
+                className={`flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1 text-[10px] font-medium transition-all duration-200 ${
                   active
                     ? "text-[#292524]"
                     : "text-[#737373] hover:text-[#262626]"
@@ -538,10 +731,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 >
                   <Icon className="h-4 w-4" />
                 </span>
-                <span className="truncate">{item.shortLabel}</span>
+                <span className="truncate max-w-full">{item.shortLabel}</span>
               </Link>
             );
           })}
+
+          <button
+            type="button"
+            onClick={() => setMoreOpen((prev) => !prev)}
+            aria-expanded={moreOpen}
+            aria-label="Mở menu thêm"
+            className={`flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1 text-[10px] font-medium transition-all duration-200 cursor-pointer ${
+              moreOpen || isMoreRoute
+                ? "text-[#292524]"
+                : "text-[#737373] hover:text-[#262626]"
+            }`}
+          >
+            <span
+              className={`flex h-7 w-10 items-center justify-center rounded-full transition-all duration-200 ${
+                moreOpen || isMoreRoute ? "bg-[#F2F2F0] text-[#292524]" : ""
+              }`}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </span>
+            <span className="truncate max-w-full">Thêm</span>
+          </button>
         </div>
       </nav>
     </div>

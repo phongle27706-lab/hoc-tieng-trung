@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Award, Check, ChevronDown, Headphones, Mic, BookOpen, PenTool } from "lucide-react";
 import type {
+  HSKLevel,
   RoadmapStage,
   SkillType,
   SkillWeights,
@@ -19,6 +20,7 @@ export interface StageTimelineProps {
   sessions: StudySession[];
   completedSessionIds: string[];
   skillWeights: SkillWeights;
+  startingLevel?: HSKLevel;
   levelFilter?: string;
   subDifficultyFilter?: SubDifficultyFilter;
   searchQuery?: string;
@@ -52,6 +54,7 @@ export function StageTimeline({
   stages,
   sessions,
   completedSessionIds,
+  startingLevel,
   levelFilter = "ALL",
   subDifficultyFilter = "all",
   searchQuery = "",
@@ -83,9 +86,45 @@ export function StageTimeline({
     [completedSessionIds]
   );
 
-  const [openStages, setOpenStages] = useState<Record<number, boolean>>(() =>
-    Object.fromEntries(stages.map((s) => [s.id, true]))
-  );
+  const [openStages, setOpenStages] = useState<Record<number, boolean>>(() => {
+    const targetLevel = startingLevel ?? stages[0]?.hskLevel;
+    const matched = stages.some((s) => s.hskLevel === targetLevel);
+    return Object.fromEntries(
+      stages.map((s, idx) => [
+        s.id,
+        matched ? s.hskLevel === targetLevel : idx === 0,
+      ])
+    );
+  });
+
+  // Auto-expand the stage matching the user's selected starting HSK level or active filter
+  useEffect(() => {
+    if (levelFilter && levelFilter !== "ALL") {
+      setOpenStages((prev) => {
+        const next = { ...prev };
+        for (const s of stages) {
+          const matches =
+            levelFilter === "HSK7-9"
+              ? ["HSK7", "HSK8", "HSK9"].includes(s.hskLevel)
+              : s.hskLevel.toUpperCase() === levelFilter.toUpperCase();
+          if (matches) next[s.id] = true;
+        }
+        return next;
+      });
+      return;
+    }
+
+    if (!startingLevel) return;
+    const matched = stages.some((s) => s.hskLevel === startingLevel);
+    setOpenStages(
+      Object.fromEntries(
+        stages.map((s, idx) => [
+          s.id,
+          matched ? s.hskLevel === startingLevel : idx === 0,
+        ])
+      )
+    );
+  }, [startingLevel, levelFilter, stages]);
 
   const toggleStage = (id: number) => {
     setOpenStages((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -324,11 +363,11 @@ export function StageTimeline({
                             </span>
                           )}
 
-                          {/* Title & Chinese / Pinyin */}
-                          <div className="min-w-0 flex-1">
-                            <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
+                          {/* Title & Single-Line Metadata */}
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
                               {session.lessonNumber !== undefined && (
-                                <span className="inline-flex shrink-0 items-center rounded-full bg-brand-soft px-2 py-0.5 text-[10px] font-bold text-brand-active">
+                                <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-brand-soft px-2 py-0.5 text-[10px] font-bold text-brand-active">
                                   Bài {session.lessonNumber}
                                 </span>
                               )}
@@ -337,32 +376,35 @@ export function StageTimeline({
                                   ? session.title.replace(/^Bài\s*\d+\s*[:：\-–—]\s*/i, "")
                                   : session.title}
                               </p>
-                              <span className="hidden items-center gap-1 rounded-full border border-[#E5E5E0] bg-[#FAF9F7] px-2 py-0.5 text-[10px] font-semibold text-[#4A4540] sm:inline-flex">
+                              <span className="hidden shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-[#E5E5E0] bg-[#FAF9F7] px-2 py-0.5 text-[10px] font-semibold text-[#4A4540] md:inline-flex">
                                 <SkillIcon className="h-3 w-3 text-[#6B655E]" />
                                 {skillMeta.label}
                               </span>
-                              <span className="hidden rounded-full bg-[#F2F2F0] px-2 py-0.5 text-[10px] font-medium text-[#6B655E] sm:inline-block">
-                                {session.subDifficulty === "basic"
-                                  ? "Cơ bản"
-                                  : "Nâng cao"}
-                              </span>
-                              {session.newWords && session.newWords.length > 0 && (
-                                <span className="hidden items-center rounded-full border border-[#E5E5E0] bg-white px-2 py-0.5 text-[10px] font-medium text-[#6B655E] sm:inline-flex">
-                                  {session.newWords.length} từ mới
-                                </span>
-                              )}
-                              {session.dialogues && session.dialogues.length > 0 && (
-                                <span className="hidden items-center rounded-full border border-[#E5E5E0] bg-white px-2 py-0.5 text-[10px] font-medium text-[#6B655E] sm:inline-flex">
-                                  {session.dialogues.length} bài khóa
-                                </span>
-                              )}
                             </div>
-                            <p className="truncate text-xs text-[#737373]">
-                              <span className="font-medium text-[#4A4540]">
-                                {session.titleZh}
-                              </span>{" "}
-                              · <span>{session.titlePinyin}</span>
-                            </p>
+                            <div className="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden text-xs text-[#737373]">
+                              <span className="min-w-0 truncate">
+                                <span className="font-medium text-[#4A4540]">
+                                  {session.titleZh}
+                                </span>{" "}
+                                · <span>{session.titlePinyin}</span>
+                              </span>
+                              <span className="hidden shrink-0 whitespace-nowrap text-[11px] text-[#737373] sm:inline">
+                                ·{" "}
+                                {[
+                                  session.newWords && session.newWords.length > 0
+                                    ? `${session.newWords.length} từ mới`
+                                    : null,
+                                  session.dialogues && session.dialogues.length > 0
+                                    ? `${session.dialogues.length} bài khóa`
+                                    : null,
+                                  session.subDifficulty === "basic"
+                                    ? "Cơ bản"
+                                    : "Nâng cao",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </span>
+                            </div>
                           </div>
                         </div>
 

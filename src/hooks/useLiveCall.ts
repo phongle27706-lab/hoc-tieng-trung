@@ -1,80 +1,111 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createChineseRecognizer,
   isSpeechRecognitionSupported,
-  speakBilingualTurn,
+  isVietnameseText,
+  speakBilingualText,
   stopSpeaking,
   type SpeechRecognitionInstance,
 } from "@/lib/speech";
-import { recordVoiceCallPractice } from "@/lib/storage";
-import {
-  evaluateChinesePronunciation,
-  VOICE_CALL_PROMPTS,
-  type PronunciationEvaluation,
-  type VoiceCallPrompt,
-} from "@/lib/voice-call";
-import type { AIPersonaMode, HSKLevel } from "@/types";
+import { getAITutorSettings, recordVoiceCallPractice } from "@/lib/storage";
+import type { AIPersonaMode } from "@/types";
 
 export type LiveCallState = "idle" | "listening" | "thinking" | "speaking";
+export type ListenLang = "zh-CN" | "vi-VN";
+
+export interface LiveCallTurn {
+  id: string;
+  role: "user" | "assistant";
+  contentZh: string;
+  contentPinyin?: string;
+  contentVi: string;
+  correctionHint?: string;
+  spokenText: string;
+  lang: ListenLang;
+}
 
 export interface UseLiveCallOptions {
   persona: AIPersonaMode;
   level: "HSK1" | "HSK3" | "HSK5";
-  avatarGender: "male" | "female";
   playViVoice: boolean;
   speechRate: number;
-  autoNext: boolean;
+  zhVoiceName?: string;
+  viVoiceName?: string;
 }
 
-const POST_SPEECH_MIC_DELAY_MS = 300;
-const SILENCE_TIMEOUT_MS = 1800;
-const NO_SPEECH_RETRY_DELAY_MS = 700;
-const MAX_NO_SPEECH_RETRIES = 2;
+const POST_SPEECH_MIC_DELAY_MS = 320;
+const SILENCE_TIMEOUT_MS = 1650;
+const NO_SPEECH_RETRY_DELAY_MS = 650;
+const MAX_NO_SPEECH_RETRIES = 3;
+
+function buildGreeting(persona: AIPersonaMode): {
+  contentZh: string;
+  contentPinyin: string;
+  contentVi: string;
+  spokenText: string;
+} {
+  switch (persona) {
+    case "vui-ve":
+      return {
+        contentZh: "你好呀！我是宝宝，今天你想聊点什么呢？",
+        contentPinyin: "Nǐ hǎo ya! Wǒ shì Bǎobǎo, jīntiān nǐ xiǎng liáo diǎn shénme ne?",
+        contentVi: "Chào bạn nha! Mình là BaoBao, hôm nay bạn muốn trò chuyện chủ đề gì nè?",
+        spokenText: "你好呀！Chào bạn nha, hôm nay bạn muốn nói chuyện gì với BaoBao nè?",
+      };
+    case "cuoi-nhao":
+      return {
+        contentZh: "嗨呀！终于来找我聊天啦？今天想聊啥呢？",
+        contentPinyin: "Hāi ya! Zhōngyú lái zhǎo wǒ liáotiān la? Jīntiān xiǎng liáo shá ne?",
+        contentVi: "Ồ, cuối cùng cũng chịu gọi cho BaoBao rồi hả? Hôm nay định nói chuyện gì nào?",
+        spokenText: "嗨呀！Cuối cùng cũng gọi cho BaoBao rồi hả? Hôm nay định tán gẫu gì nào?",
+      };
+    case "khinh-bi":
+      return {
+        contentZh: "哼，来了呀？说吧，今天想练什么呢？",
+        contentPinyin: "Hēng, lái le ya? Shuō ba, jīntiān xiǎng liàn shénme ne?",
+        contentVi: "Hừ, tới rồi à? Nói đi, hôm nay muốn luyện gì nào?",
+        spokenText: "哼，来了呀？Nói đi, hôm nay muốn luyện tiếng Trung chủ đề gì nào?",
+      };
+    default:
+      return {
+        contentZh: "你好呀！我是宝宝，随便用中文或越南语聊吧，你今天过得怎么样？",
+        contentPinyin: "Nǐ hǎo ya! Wǒ shì Bǎobǎo, suíbiàn yòng Zhōngwén huò Yuènányǔ liáo ba, nǐ jīntiān guò de zěnmeyàng?",
+        contentVi: "Chào bạn! Mình là BaoBao, bạn cứ nói tiếng Trung hoặc tiếng Việt thoải mái nhé. Hôm nay của bạn thế nào?",
+        spokenText: "你好呀！Chào bạn, cứ nói tiếng Trung hoặc tiếng Việt thoải mái nhé. Hôm nay của bạn thế nào?",
+      };
+  }
+}
 
 export function useLiveCall(options: UseLiveCallOptions) {
-  const { persona, level, avatarGender, playViVoice, speechRate, autoNext } = options;
+  const { persona, level, playViVoice, speechRate, zhVoiceName, viVoiceName } = options;
 
   const [callState, setCallState] = useState<LiveCallState>("idle");
   const [isCallActive, setIsCallActive] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [promptIndex, setPromptIndex] = useState(0);
+  const [listenLang, setListenLangState] = useState<ListenLang>("zh-CN");
   const [liveTranscript, setLiveTranscript] = useState("");
-  const [evaluation, setEvaluation] = useState<PronunciationEvaluation | null>(null);
+  const [turns, setTurns] = useState<LiveCallTurn[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [noSpeechHint, setNoSpeechHint] = useState<string | null>(null);
   const [speechSupported, setSpeechSupported] = useState(false);
   const [speakingPhase, setSpeakingPhase] = useState<"vi" | "zh" | null>(null);
-  const [practicedCount, setPracticedCount] = useState(0);
-  const [totalAccuracySum, setTotalAccuracySum] = useState(0);
-
-  const levelPrompts = useMemo<VoiceCallPrompt[]>(() => {
-    const allowed: HSKLevel[] =
-      level === "HSK1"
-        ? ["HSK0", "HSK1", "HSK2"]
-        : level === "HSK3"
-        ? ["HSK2", "HSK3", "HSK4"]
-        : ["HSK4", "HSK5", "HSK6"];
-    const matched = VOICE_CALL_PROMPTS.filter((p) => allowed.includes(p.level));
-    return matched.length > 0 ? matched : VOICE_CALL_PROMPTS;
-  }, [level]);
-
-  const currentPrompt: VoiceCallPrompt | undefined =
-    levelPrompts[promptIndex % Math.max(1, levelPrompts.length)];
-
-  const avgAccuracy =
-    practicedCount > 0 ? Math.round(totalAccuracySum / practicedCount) : 0;
+  const [bargeInEnabled, setBargeInEnabled] = useState(true);
 
   const personaRef = useRef(persona);
-  const avatarGenderRef = useRef(avatarGender);
+  const levelRef = useRef(level);
   const playViVoiceRef = useRef(playViVoice);
   const speechRateRef = useRef(speechRate);
-  const autoNextRef = useRef(autoNext);
-  const levelPromptsRef = useRef(levelPrompts);
-  const promptIndexRef = useRef(promptIndex);
+  const zhVoiceNameRef = useRef(zhVoiceName);
+  const viVoiceNameRef = useRef(viVoiceName);
+  const listenLangRef = useRef<ListenLang>(listenLang);
+  const turnsRef = useRef<LiveCallTurn[]>(turns);
+
   const isCallActiveRef = useRef(false);
   const isMutedRef = useRef(false);
+  const bargeInEnabledRef = useRef(true);
+  const callStateRef = useRef<LiveCallState>("idle");
 
   const turnIdRef = useRef(0);
   const recognizerRef = useRef<SpeechRecognitionInstance | null>(null);
@@ -82,39 +113,38 @@ export function useLiveCall(options: UseLiveCallOptions) {
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const noSpeechRetriesRef = useRef(0);
-  const callStateRef = useRef<LiveCallState>("idle");
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     callStateRef.current = callState;
   }, [callState]);
-
   useEffect(() => {
     personaRef.current = persona;
   }, [persona]);
-
   useEffect(() => {
-    avatarGenderRef.current = avatarGender;
-  }, [avatarGender]);
-
+    levelRef.current = level;
+  }, [level]);
   useEffect(() => {
     playViVoiceRef.current = playViVoice;
   }, [playViVoice]);
-
   useEffect(() => {
     speechRateRef.current = speechRate;
   }, [speechRate]);
-
   useEffect(() => {
-    autoNextRef.current = autoNext;
-  }, [autoNext]);
-
+    zhVoiceNameRef.current = zhVoiceName;
+  }, [zhVoiceName]);
   useEffect(() => {
-    levelPromptsRef.current = levelPrompts;
-  }, [levelPrompts]);
-
+    viVoiceNameRef.current = viVoiceName;
+  }, [viVoiceName]);
   useEffect(() => {
-    promptIndexRef.current = promptIndex;
-  }, [promptIndex]);
+    listenLangRef.current = listenLang;
+  }, [listenLang]);
+  useEffect(() => {
+    turnsRef.current = turns;
+  }, [turns]);
+  useEffect(() => {
+    bargeInEnabledRef.current = bargeInEnabled;
+  }, [bargeInEnabled]);
 
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current !== null) {
@@ -157,261 +187,28 @@ export function useLiveCall(options: UseLiveCallOptions) {
     }
   }, [clearSilenceTimer]);
 
-  const openMicForPromptRef = useRef<(prompt: VoiceCallPrompt) => void>(() => {});
-  const speakPromptAndListenRef = useRef<(prompt: VoiceCallPrompt) => void>(() => {});
+  const openMicRef = useRef<() => void>(() => {});
 
-  const evaluateAndRespond = useCallback(
-    (spokenText: string, prompt: VoiceCallPrompt) => {
-      if (!isCallActiveRef.current) return;
-
-      const myTurn = ++turnIdRef.current;
-      abortRecognizer();
-      stopSpeaking();
-      setNoSpeechHint(null);
-      setCallState("thinking");
-
-      const result = evaluateChinesePronunciation(
-        prompt.targetZh,
-        spokenText,
-        personaRef.current,
-        prompt.targetPinyin
-      );
-      setEvaluation(result);
-      setPracticedCount((c) => c + 1);
-      setTotalAccuracySum((s) => s + result.accuracy);
-      recordVoiceCallPractice(result.accuracy);
-
+  const speakAndThenListen = useCallback(
+    (textToSpeak: string, myTurn: number) => {
+      if (turnIdRef.current !== myTurn || !isCallActiveRef.current) return;
       setCallState("speaking");
 
-      speakBilingualTurn(result.feedbackVi, result.encouragementZh, {
-        playVi: playViVoiceRef.current,
+      speakBilingualText(textToSpeak, {
         rate: speechRateRef.current,
-        gender: avatarGenderRef.current,
+        zhVoiceName: zhVoiceNameRef.current || undefined,
+        viVoiceName: viVoiceNameRef.current || undefined,
         onPhaseChange: (phase) => {
           if (turnIdRef.current !== myTurn || !isCallActiveRef.current) return;
-
           if (phase !== "done") {
             setSpeakingPhase(phase);
             return;
           }
-
-          setSpeakingPhase(null);
-
-          if (result.passed && autoNextRef.current) {
-            scheduleTimer(() => {
-              if (turnIdRef.current !== myTurn || !isCallActiveRef.current) return;
-              const list = levelPromptsRef.current;
-              if (list.length === 0) return;
-              const nextIdx = (promptIndexRef.current + 1) % list.length;
-              promptIndexRef.current = nextIdx;
-              setPromptIndex(nextIdx);
-              setLiveTranscript("");
-              setEvaluation(null);
-              speakPromptAndListenRef.current(list[nextIdx]);
-            }, 650);
-          } else {
-            scheduleTimer(() => {
-              if (turnIdRef.current !== myTurn || !isCallActiveRef.current) return;
-              if (!isMutedRef.current) {
-                openMicForPromptRef.current(prompt);
-              } else {
-                setCallState("idle");
-              }
-            }, POST_SPEECH_MIC_DELAY_MS);
-          }
-        },
-      });
-    },
-    [abortRecognizer, scheduleTimer]
-  );
-
-  const openMicForPrompt = useCallback(
-    (prompt: VoiceCallPrompt) => {
-      if (!isCallActiveRef.current || isMutedRef.current) {
-        setCallState("idle");
-        return;
-      }
-
-      if (!isSpeechRecognitionSupported()) {
-        setCallState("idle");
-        setErrorMsg(
-          "Trình duyệt không hỗ trợ thu âm trực tiếp. Hãy dùng nút 'Giả lập câu đọc' bên dưới."
-        );
-        return;
-      }
-
-      const myTurn = ++turnIdRef.current;
-      stopSpeaking();
-      abortRecognizer();
-
-      transcriptRef.current = "";
-      setLiveTranscript("");
-      setErrorMsg(null);
-      setSpeakingPhase(null);
-      setCallState("listening");
-
-      let handled = false;
-      let hadError: string | null = null;
-
-      const resetSilenceDebounce = () => {
-        clearSilenceTimer();
-        silenceTimerRef.current = scheduleTimer(() => {
-          if (turnIdRef.current !== myTurn || handled) return;
-          if (transcriptRef.current.trim().length > 0) {
-            try {
-              recognizerRef.current?.stop();
-            } catch {
-              // Ignore
-            }
-          }
-        }, SILENCE_TIMEOUT_MS);
-      };
-
-      const recognizer = createChineseRecognizer(
-        {
-          onResult: (text, isFinal) => {
-            if (turnIdRef.current !== myTurn || handled) return;
-            transcriptRef.current = text;
-            setLiveTranscript(text);
-            noSpeechRetriesRef.current = 0;
-            setNoSpeechHint(null);
-
-            if (isFinal && text.trim().length > 0) {
-              handled = true;
-              clearSilenceTimer();
-              evaluateAndRespond(text.trim(), prompt);
-            } else if (text.trim().length > 0) {
-              resetSilenceDebounce();
-            }
-          },
-          onError: (err) => {
-            if (turnIdRef.current !== myTurn || handled) return;
-            hadError = err;
-            clearSilenceTimer();
-
-            if (err === "not-allowed" || err === "service-not-allowed") {
-              handled = true;
-              setCallState("idle");
-              setErrorMsg(
-                "Chưa được cấp quyền Microphone. Hãy cấp quyền hoặc bấm 'Giả lập câu đọc'."
-              );
-              return;
-            }
-
-            if (err === "aborted") {
-              handled = true;
-              return;
-            }
-
-            if (err === "no-speech") {
-              handled = true;
-              if (
-                isCallActiveRef.current &&
-                !isMutedRef.current &&
-                noSpeechRetriesRef.current < MAX_NO_SPEECH_RETRIES
-              ) {
-                noSpeechRetriesRef.current += 1;
-                setNoSpeechHint("BaoBao chưa nghe rõ, đang tự mở lại mic...");
-                scheduleTimer(() => {
-                  if (
-                    turnIdRef.current === myTurn &&
-                    isCallActiveRef.current &&
-                    !isMutedRef.current
-                  ) {
-                    openMicForPromptRef.current(prompt);
-                  }
-                }, NO_SPEECH_RETRY_DELAY_MS);
-              } else {
-                setCallState("idle");
-                setNoSpeechHint("Không phát hiện giọng nói. Bấm 'Thu âm lại' khi bạn sẵn sàng.");
-              }
-              return;
-            }
-
-            handled = true;
-            setCallState("idle");
-            setErrorMsg(`Lỗi nhận diện giọng nói (${err}). Bấm 'Thu âm lại' để tiếp tục.`);
-          },
-          onEnd: () => {
-            if (turnIdRef.current !== myTurn || handled) return;
-            clearSilenceTimer();
-            const captured = transcriptRef.current.trim();
-            if (captured.length > 0) {
-              handled = true;
-              evaluateAndRespond(captured, prompt);
-            } else if (!hadError) {
-              if (
-                isCallActiveRef.current &&
-                !isMutedRef.current &&
-                noSpeechRetriesRef.current < MAX_NO_SPEECH_RETRIES
-              ) {
-                noSpeechRetriesRef.current += 1;
-                setNoSpeechHint("Đang chờ bạn đọc câu mẫu...");
-                scheduleTimer(() => {
-                  if (
-                    turnIdRef.current === myTurn &&
-                    isCallActiveRef.current &&
-                    !isMutedRef.current
-                  ) {
-                    openMicForPromptRef.current(prompt);
-                  }
-                }, NO_SPEECH_RETRY_DELAY_MS);
-              } else {
-                setCallState("idle");
-              }
-            }
-          },
-        },
-        { continuous: false, interimResults: true, lang: "zh-CN" }
-      );
-
-      if (!recognizer) {
-        setCallState("idle");
-        setErrorMsg("Không thể khởi tạo bộ nhận diện giọng nói trên trình duyệt này.");
-        return;
-      }
-
-      recognizerRef.current = recognizer;
-      try {
-        recognizer.start();
-      } catch {
-        setCallState("idle");
-        setErrorMsg("Microphone đang bận. Hãy bấm 'Thu âm lại' sau 1 giây.");
-      }
-    },
-    [abortRecognizer, clearSilenceTimer, evaluateAndRespond, scheduleTimer]
-  );
-
-  const speakPromptAndListen = useCallback(
-    (prompt: VoiceCallPrompt) => {
-      if (!isCallActiveRef.current) return;
-
-      const myTurn = ++turnIdRef.current;
-      abortRecognizer();
-      stopSpeaking();
-      noSpeechRetriesRef.current = 0;
-
-      setErrorMsg(null);
-      setNoSpeechHint(null);
-      setCallState("speaking");
-
-      speakBilingualTurn(prompt.introVi, prompt.targetZh, {
-        playVi: playViVoiceRef.current,
-        rate: speechRateRef.current,
-        gender: avatarGenderRef.current,
-        onPhaseChange: (phase) => {
-          if (turnIdRef.current !== myTurn || !isCallActiveRef.current) return;
-
-          if (phase !== "done") {
-            setSpeakingPhase(phase);
-            return;
-          }
-
           setSpeakingPhase(null);
           scheduleTimer(() => {
             if (turnIdRef.current !== myTurn || !isCallActiveRef.current) return;
             if (!isMutedRef.current) {
-              openMicForPromptRef.current(prompt);
+              openMicRef.current();
             } else {
               setCallState("idle");
             }
@@ -419,18 +216,279 @@ export function useLiveCall(options: UseLiveCallOptions) {
         },
       });
     },
-    [abortRecognizer, scheduleTimer]
+    [scheduleTimer]
   );
 
-  useEffect(() => {
-    openMicForPromptRef.current = openMicForPrompt;
-  }, [openMicForPrompt]);
+  const sendUserSpeech = useCallback(
+    async (spokenText: string) => {
+      const cleaned = spokenText.trim();
+      if (!cleaned || !isCallActiveRef.current) return;
+
+      const myTurn = ++turnIdRef.current;
+      abortRecognizer();
+      stopSpeaking();
+      abortControllerRef.current?.abort();
+      setNoSpeechHint(null);
+      setErrorMsg(null);
+      setCallState("thinking");
+
+      const spokeVietnamese =
+        listenLangRef.current === "vi-VN" || isVietnameseText(cleaned);
+
+      const userTurn: LiveCallTurn = {
+        id: `u-${Date.now()}`,
+        role: "user",
+        contentZh: cleaned,
+        contentVi: cleaned,
+        spokenText: cleaned,
+        lang: spokeVietnamese ? "vi-VN" : "zh-CN",
+      };
+
+      const nextHistory = [...turnsRef.current, userTurn];
+      turnsRef.current = nextHistory;
+      setTurns(nextHistory);
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      try {
+        const savedSettings = getAITutorSettings();
+        const res = await fetch("/api/ai-tutor", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            message: cleaned,
+            history: nextHistory.slice(-8).map((t) => ({
+              role: t.role,
+              contentZh: t.contentZh,
+              contentVi: t.contentVi,
+            })),
+            persona: personaRef.current,
+            levelLimit: levelRef.current,
+            roleplayRole: "friend",
+            apiKey: savedSettings.apiKey || undefined,
+            provider: savedSettings.provider,
+          }),
+        });
+
+        if (turnIdRef.current !== myTurn || !isCallActiveRef.current) return;
+
+        let contentZh = "嗯嗯，我听懂啦！你还可以再说说吗？";
+        let contentPinyin = "Ńg ńg, wǒ tīngdǒng la! Nǐ hái kěyǐ zài shuōshuo ma?";
+        let contentVi = "Ừm ừm, mình hiểu rồi nè! Bạn kể thêm đi?";
+        let correctionHint: string | undefined;
+
+        if (res.ok) {
+          const data = (await res.json()) as {
+            contentZh?: string;
+            contentPinyin?: string;
+            contentVi?: string;
+            correctionHint?: string;
+          };
+          if (data.contentZh) contentZh = data.contentZh;
+          if (data.contentPinyin) contentPinyin = data.contentPinyin;
+          if (data.contentVi) contentVi = data.contentVi;
+          if (data.correctionHint) correctionHint = data.correctionHint;
+        }
+
+        // Build natural bilingual speech text:
+        // - If user spoke Vietnamese: speak BaoBao's Vietnamese reply (which includes the suggested Chinese sentence,
+        //   or append contentZh if contentVi doesn't already contain Hanzi) so BaoBao is NEVER silent in VI/bilingual!
+        // - If user spoke Chinese: speak contentZh naturally (plus brief Vietnamese hint if playViVoice is on & hint exists).
+        let speechText = contentZh;
+        if (spokeVietnamese) {
+          const viHasHanzi = /\p{Script=Han}/u.test(contentVi);
+          speechText = viHasHanzi ? contentVi : `${contentVi} ${contentZh}`;
+        } else if (playViVoiceRef.current && correctionHint) {
+          speechText = `${contentZh} ${correctionHint}`;
+        }
+
+        const aiTurn: LiveCallTurn = {
+          id: `a-${Date.now()}`,
+          role: "assistant",
+          contentZh,
+          contentPinyin,
+          contentVi,
+          correctionHint,
+          spokenText: speechText,
+          lang: spokeVietnamese ? "vi-VN" : "zh-CN",
+        };
+
+        const updatedTurns = [...turnsRef.current, aiTurn];
+        turnsRef.current = updatedTurns;
+        setTurns(updatedTurns);
+        setLiveTranscript("");
+        recordVoiceCallPractice(90);
+
+        speakAndThenListen(speechText, myTurn);
+      } catch (err) {
+        if ((err as { name?: string })?.name === "AbortError") return;
+        if (turnIdRef.current !== myTurn || !isCallActiveRef.current) return;
+
+        const fallbackText = spokeVietnamese
+          ? "Mạng hơi chập chờn một chút, bạn nói lại cho BaoBao nghe nhé?"
+          : "抱歉呀，刚才信号有点卡，你能再说一遍吗？";
+        speakAndThenListen(fallbackText, myTurn);
+      }
+    },
+    [abortRecognizer, speakAndThenListen]
+  );
+
+  const openMic = useCallback(() => {
+    if (!isCallActiveRef.current || isMutedRef.current) {
+      setCallState("idle");
+      return;
+    }
+
+    if (!isSpeechRecognitionSupported()) {
+      setCallState("idle");
+      setErrorMsg("Trình duyệt không hỗ trợ nhận diện giọng nói (Web Speech API).");
+      return;
+    }
+
+    const myTurn = ++turnIdRef.current;
+    stopSpeaking();
+    abortRecognizer();
+
+    transcriptRef.current = "";
+    setLiveTranscript("");
+    setErrorMsg(null);
+    setSpeakingPhase(null);
+    setCallState("listening");
+
+    let handled = false;
+    let hadError: string | null = null;
+
+    const resetSilenceDebounce = () => {
+      clearSilenceTimer();
+      silenceTimerRef.current = scheduleTimer(() => {
+        if (turnIdRef.current !== myTurn || handled) return;
+        if (transcriptRef.current.trim().length > 0) {
+          try {
+            recognizerRef.current?.stop();
+          } catch {
+            // Ignore
+          }
+        }
+      }, SILENCE_TIMEOUT_MS);
+    };
+
+    const recognizer = createChineseRecognizer(
+      {
+        onResult: (text, isFinal) => {
+          if (turnIdRef.current !== myTurn || handled) return;
+          transcriptRef.current = text;
+          setLiveTranscript(text);
+          noSpeechRetriesRef.current = 0;
+          setNoSpeechHint(null);
+
+          if (isFinal && text.trim().length > 0) {
+            handled = true;
+            clearSilenceTimer();
+            void sendUserSpeech(text.trim());
+          } else if (text.trim().length > 0) {
+            resetSilenceDebounce();
+          }
+        },
+        onError: (err) => {
+          if (turnIdRef.current !== myTurn || handled) return;
+          hadError = err;
+          clearSilenceTimer();
+
+          if (err === "not-allowed" || err === "service-not-allowed") {
+            handled = true;
+            setCallState("idle");
+            setErrorMsg("Chưa được cấp quyền Microphone. Vui lòng bật Mic trên trình duyệt.");
+            return;
+          }
+
+          if (err === "aborted") {
+            handled = true;
+            return;
+          }
+
+          if (err === "no-speech") {
+            handled = true;
+            if (
+              isCallActiveRef.current &&
+              !isMutedRef.current &&
+              noSpeechRetriesRef.current < MAX_NO_SPEECH_RETRIES
+            ) {
+              noSpeechRetriesRef.current += 1;
+              setNoSpeechHint("BaoBao vẫn đang lắng nghe bạn...");
+              scheduleTimer(() => {
+                if (
+                  turnIdRef.current === myTurn &&
+                  isCallActiveRef.current &&
+                  !isMutedRef.current
+                ) {
+                  openMicRef.current();
+                }
+              }, NO_SPEECH_RETRY_DELAY_MS);
+            } else {
+              setCallState("idle");
+              setNoSpeechHint("Chưa nghe thấy giọng nói. Nhấn Mic để tiếp tục nói.");
+            }
+            return;
+          }
+
+          handled = true;
+          setCallState("idle");
+          setErrorMsg(`Lỗi nhận diện giọng nói (${err}). Nhấn Mic để thử lại.`);
+        },
+        onEnd: () => {
+          if (turnIdRef.current !== myTurn || handled) return;
+          clearSilenceTimer();
+          const captured = transcriptRef.current.trim();
+          if (captured.length > 0) {
+            handled = true;
+            void sendUserSpeech(captured);
+          } else if (!hadError) {
+            if (
+              isCallActiveRef.current &&
+              !isMutedRef.current &&
+              noSpeechRetriesRef.current < MAX_NO_SPEECH_RETRIES
+            ) {
+              noSpeechRetriesRef.current += 1;
+              scheduleTimer(() => {
+                if (
+                  turnIdRef.current === myTurn &&
+                  isCallActiveRef.current &&
+                  !isMutedRef.current
+                ) {
+                  openMicRef.current();
+                }
+              }, NO_SPEECH_RETRY_DELAY_MS);
+            } else {
+              setCallState("idle");
+            }
+          }
+        },
+      },
+      { continuous: false, interimResults: true, lang: listenLangRef.current }
+    );
+
+    if (!recognizer) {
+      setCallState("idle");
+      setErrorMsg("Không thể khởi tạo nhận diện giọng nói trên trình duyệt này.");
+      return;
+    }
+
+    recognizerRef.current = recognizer;
+    try {
+      recognizer.start();
+    } catch {
+      setCallState("idle");
+      setErrorMsg("Microphone đang bận. Nhấn Mic để thử lại.");
+    }
+  }, [abortRecognizer, clearSilenceTimer, scheduleTimer, sendUserSpeech]);
 
   useEffect(() => {
-    speakPromptAndListenRef.current = speakPromptAndListen;
-  }, [speakPromptAndListen]);
+    openMicRef.current = openMic;
+  }, [openMic]);
 
-  // ── Barge-in VAD: detect user speech while BaoBao is talking ──
+  // ── Barge-in VAD (AUDIO ONLY — never requests camera/video) ──
   const vadRef = useRef<{
     stream: MediaStream;
     ctx: AudioContext;
@@ -438,11 +496,6 @@ export function useLiveCall(options: UseLiveCallOptions) {
     raf: number;
   } | null>(null);
   const micLevelRef = useRef(0);
-  const [bargeInEnabled, setBargeInEnabled] = useState(true);
-  const bargeInEnabledRef = useRef(true);
-  useEffect(() => {
-    bargeInEnabledRef.current = bargeInEnabled;
-  }, [bargeInEnabled]);
 
   const stopVad = useCallback(() => {
     const v = vadRef.current;
@@ -455,7 +508,13 @@ export function useLiveCall(options: UseLiveCallOptions) {
   }, []);
 
   const startVad = useCallback(async () => {
-    if (vadRef.current || typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
+    if (
+      vadRef.current ||
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices?.getUserMedia
+    ) {
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -464,13 +523,16 @@ export function useLiveCall(options: UseLiveCallOptions) {
         stream.getTracks().forEach((tr) => tr.stop());
         return;
       }
-      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const Ctx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const ctx = new Ctx();
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 512;
       ctx.createMediaStreamSource(stream).connect(analyser);
       const buf = new Uint8Array(analyser.fftSize);
       let loudSince = 0;
+
       const tick = () => {
         const v = vadRef.current;
         if (!v) return;
@@ -483,23 +545,20 @@ export function useLiveCall(options: UseLiveCallOptions) {
         const rms = Math.sqrt(sum / buf.length);
         micLevelRef.current = rms;
         const now = performance.now();
+
         if (
           bargeInEnabledRef.current &&
           callStateRef.current === "speaking" &&
           !isMutedRef.current &&
-          rms > 0.09
+          rms > 0.085
         ) {
           if (!loudSince) loudSince = now;
-          if (now - loudSince > 280) {
+          if (now - loudSince > 240) {
             loudSince = 0;
-            const list = levelPromptsRef.current;
-            const prompt = list[promptIndexRef.current % Math.max(1, list.length)];
-            if (prompt) {
-              stopSpeaking();
-              setSpeakingPhase(null);
-              noSpeechRetriesRef.current = 0;
-              openMicForPromptRef.current(prompt);
-            }
+            stopSpeaking();
+            setSpeakingPhase(null);
+            noSpeechRetriesRef.current = 0;
+            openMicRef.current();
           }
         } else {
           loudSince = 0;
@@ -508,7 +567,7 @@ export function useLiveCall(options: UseLiveCallOptions) {
       };
       vadRef.current = { stream, ctx, analyser, raf: requestAnimationFrame(tick) };
     } catch {
-      // Mic denied: barge-in unavailable, hands-free loop still works
+      // Mic permission denied for VAD: hands-free SpeechRecognition still works
     }
   }, []);
 
@@ -519,6 +578,7 @@ export function useLiveCall(options: UseLiveCallOptions) {
     return () => {
       isCallActiveRef.current = false;
       turnIdRef.current += 1;
+      abortControllerRef.current?.abort();
       clearAllTimers();
       abortRecognizer();
       stopSpeaking();
@@ -527,13 +587,10 @@ export function useLiveCall(options: UseLiveCallOptions) {
   }, [abortRecognizer, clearAllTimers, stopVad]);
 
   const startCall = useCallback(() => {
-    const list = levelPromptsRef.current;
-    const prompt = list[promptIndexRef.current % Math.max(1, list.length)];
-    if (!prompt) return;
-
     clearAllTimers();
     abortRecognizer();
     stopSpeaking();
+    abortControllerRef.current?.abort();
 
     isCallActiveRef.current = true;
     isMutedRef.current = false;
@@ -542,17 +599,31 @@ export function useLiveCall(options: UseLiveCallOptions) {
     setIsCallActive(true);
     setIsMuted(false);
     setLiveTranscript("");
-    setEvaluation(null);
     setErrorMsg(null);
     setNoSpeechHint(null);
 
-    speakPromptAndListen(prompt);
+    const greeting = buildGreeting(personaRef.current);
+    const greetTurn: LiveCallTurn = {
+      id: `g-${Date.now()}`,
+      role: "assistant",
+      contentZh: greeting.contentZh,
+      contentPinyin: greeting.contentPinyin,
+      contentVi: greeting.contentVi,
+      spokenText: greeting.spokenText,
+      lang: listenLangRef.current,
+    };
+    turnsRef.current = [greetTurn];
+    setTurns([greetTurn]);
+
+    const myTurn = ++turnIdRef.current;
+    speakAndThenListen(greeting.spokenText, myTurn);
     void startVad();
-  }, [abortRecognizer, clearAllTimers, speakPromptAndListen, startVad]);
+  }, [abortRecognizer, clearAllTimers, speakAndThenListen, startVad]);
 
   const endCall = useCallback(() => {
     isCallActiveRef.current = false;
     turnIdRef.current += 1;
+    abortControllerRef.current?.abort();
     clearAllTimers();
     abortRecognizer();
     stopSpeaking();
@@ -562,6 +633,7 @@ export function useLiveCall(options: UseLiveCallOptions) {
     setCallState("idle");
     setSpeakingPhase(null);
     setNoSpeechHint(null);
+    setLiveTranscript("");
   }, [abortRecognizer, clearAllTimers, stopVad]);
 
   const toggleMute = useCallback(() => {
@@ -576,132 +648,85 @@ export function useLiveCall(options: UseLiveCallOptions) {
         setCallState("idle");
       }
     } else if (isCallActiveRef.current && callStateRef.current === "idle") {
-      const list = levelPromptsRef.current;
-      const prompt = list[promptIndexRef.current % Math.max(1, list.length)];
-      if (prompt) {
-        noSpeechRetriesRef.current = 0;
-        openMicForPrompt(prompt);
-      }
+      noSpeechRetriesRef.current = 0;
+      openMic();
     }
-  }, [abortRecognizer, openMicForPrompt]);
+  }, [abortRecognizer, openMic]);
+
+  const setListenLang = useCallback(
+    (lang: ListenLang) => {
+      listenLangRef.current = lang;
+      setListenLangState(lang);
+      if (isCallActiveRef.current && callStateRef.current === "listening" && !isMutedRef.current) {
+        noSpeechRetriesRef.current = 0;
+        openMic();
+      }
+    },
+    [openMic]
+  );
 
   const retryListening = useCallback(() => {
-    const list = levelPromptsRef.current;
-    const prompt = list[promptIndexRef.current % Math.max(1, list.length)];
-    if (!prompt) return;
-
     if (!isCallActiveRef.current) {
       isCallActiveRef.current = true;
       setIsCallActive(true);
+      void startVad();
     }
     if (isMutedRef.current) {
       isMutedRef.current = false;
       setIsMuted(false);
     }
-
     noSpeechRetriesRef.current = 0;
-    setEvaluation(null);
-    openMicForPrompt(prompt);
-  }, [openMicForPrompt]);
+    openMic();
+  }, [openMic, startVad]);
 
-  const replayModel = useCallback(() => {
-    const list = levelPromptsRef.current;
-    const prompt = list[promptIndexRef.current % Math.max(1, list.length)];
-    if (!prompt) return;
-
+  const replayLastReply = useCallback(() => {
+    const lastAi = [...turnsRef.current].reverse().find((t) => t.role === "assistant");
+    if (!lastAi) return;
     if (!isCallActiveRef.current) {
       isCallActiveRef.current = true;
       setIsCallActive(true);
     }
-    speakPromptAndListen(prompt);
-  }, [speakPromptAndListen]);
+    const myTurn = ++turnIdRef.current;
+    abortRecognizer();
+    speakAndThenListen(lastAi.spokenText, myTurn);
+  }, [abortRecognizer, speakAndThenListen]);
 
-  const nextPrompt = useCallback(() => {
-    const list = levelPromptsRef.current;
-    if (list.length === 0) return;
-
-    const nextIdx = (promptIndexRef.current + 1) % list.length;
-    promptIndexRef.current = nextIdx;
-    setPromptIndex(nextIdx);
-    setLiveTranscript("");
-    setEvaluation(null);
-    setErrorMsg(null);
-    setNoSpeechHint(null);
-
-    if (isCallActiveRef.current) {
-      speakPromptAndListen(list[nextIdx]);
-    }
-  }, [speakPromptAndListen]);
-
-  const selectLevel = useCallback(
-    (newLevel: "HSK1" | "HSK3" | "HSK5") => {
-      const allowed: HSKLevel[] =
-        newLevel === "HSK1"
-          ? ["HSK0", "HSK1", "HSK2"]
-          : newLevel === "HSK3"
-          ? ["HSK2", "HSK3", "HSK4"]
-          : ["HSK4", "HSK5", "HSK6"];
-      const nextList = VOICE_CALL_PROMPTS.filter((p) => allowed.includes(p.level));
-      levelPromptsRef.current = nextList;
-      promptIndexRef.current = 0;
-      setPromptIndex(0);
-      setLiveTranscript("");
-      setEvaluation(null);
-      setErrorMsg(null);
-      setNoSpeechHint(null);
-
-      if (isCallActiveRef.current && nextList[0]) {
-        speakPromptAndListen(nextList[0]);
-      }
-    },
-    [speakPromptAndListen]
-  );
-
-  const simulateAttempt = useCallback(
-    (quality: "good" | "partial") => {
-      const list = levelPromptsRef.current;
-      const prompt = list[promptIndexRef.current % Math.max(1, list.length)];
-      if (!prompt) return;
-
+  const sendSampleUtterance = useCallback(
+    (sampleText: string) => {
       if (!isCallActiveRef.current) {
         isCallActiveRef.current = true;
         setIsCallActive(true);
+        void startVad();
       }
-
-      let sample = prompt.targetZh;
-      if (quality === "partial") {
-        sample = prompt.targetZh.slice(0, Math.max(2, Math.floor(prompt.targetZh.length * 0.6)));
-      }
-
-      setLiveTranscript(sample);
-      evaluateAndRespond(sample, prompt);
+      setLiveTranscript(sampleText);
+      void sendUserSpeech(sampleText);
     },
-    [evaluateAndRespond]
+    [sendUserSpeech, startVad]
   );
+
+  const lastAssistantTurn = [...turns].reverse().find((t) => t.role === "assistant") ?? null;
+  const lastUserTurn = [...turns].reverse().find((t) => t.role === "user") ?? null;
 
   return {
     callState,
     isCallActive,
     isMuted,
-    currentPrompt,
-    promptIndex,
-    totalPromptsInLevel: levelPrompts.length,
+    listenLang,
+    setListenLang,
     liveTranscript,
-    evaluation,
+    turns,
+    lastAssistantTurn,
+    lastUserTurn,
     errorMsg,
     noSpeechHint,
     speechSupported,
     speakingPhase,
-    practicedCount,
-    avgAccuracy,
     startCall,
     endCall,
     toggleMute,
     retryListening,
-    replayModel,
-    nextPrompt,
-    selectLevel,
-    simulateAttempt,
+    replayLastReply,
+    sendSampleUtterance,
     getMicLevel,
     bargeInEnabled,
     setBargeInEnabled,

@@ -22,7 +22,6 @@ const SITE_URL =
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  alternates: { canonical: "/" },
   title: {
     default: "Quái Vật Tiếng Trung — Nền Tảng Tự Học Tiếng Trung Mức 0 – HSK 9 Cho Người Việt",
     template: "%s | Quái Vật Tiếng Trung",

@@ -164,7 +164,7 @@ export function VideoLecturePanel({
             key={activeVideoId}
             src={embedSrc}
             title={session.title}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; compute-pressure"
             referrerPolicy="strict-origin-when-cross-origin"
             allowFullScreen
             className="h-full w-full border-0"

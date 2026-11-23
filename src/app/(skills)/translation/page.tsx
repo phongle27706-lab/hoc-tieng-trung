@@ -27,6 +27,7 @@ import { speakChinese } from "@/lib/speech";
 import { addXP, markLessonCompleted, recordMistake } from "@/lib/storage";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { UnifiedFilterBar } from "@/components/ui/UnifiedFilterBar";
 import {
   Card,
   CardContent,
@@ -279,146 +280,106 @@ export default function TranslationPage() {
       : currentExercise?.sourcePinyin;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 pb-12">
-      {/* Header & Direction Switcher */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-[#6B655E]">
-            <ArrowLeftRight className="h-5 w-5" />
-            <span className="text-xs font-semibold uppercase tracking-wider">
-              双语翻译 · Luyện Dịch Song Ngữ Hai Chiều (Mức 0 → HSK 9)
-            </span>
-          </div>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[#262626] sm:text-3xl">
+    <div className="mx-auto max-w-5xl space-y-4 pb-12">
+      {/* Compact Header & Direction Switcher */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <ArrowLeftRight className="h-4 w-4 text-brand" />
+          <h1 className="text-lg font-bold tracking-tight text-[#262626] sm:text-xl">
             {direction === "vi-to-zh"
-              ? "Dịch Việt → Trung (Phản Xạ Đặt Câu Chữ Hán)"
-              : "Dịch Trung → Việt (Đọc Hiểu & Dịch Chuẩn Xác)"}
+              ? "Dịch Việt → Trung"
+              : "Dịch Trung → Việt"}
           </h1>
-          <p className="mt-1 text-sm text-[#737373]">
-            Chấm điểm bản dịch tự động theo từ khóa bắt buộc, phân tích cấu trúc ngữ pháp và cảnh báo lỗi sai người Việt thường gặp.
-          </p>
+          <span className="hidden text-xs font-medium text-[#737373] sm:inline">
+            双语翻译 · Mức 0 → HSK 9
+          </span>
         </div>
 
         {/* Direction Toggle Pills */}
-        <div className="inline-flex self-start rounded-2xl border border-[#E5E5E0] bg-white p-1.5 lg:self-auto">
+        <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-white p-0.5">
           <button
             type="button"
             onClick={() => handleDirectionChange("vi-to-zh")}
-            className={`cursor-pointer rounded-xl px-4 py-2 text-xs font-semibold transition-colors ${
+            className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
               direction === "vi-to-zh"
-                ? "bg-[#292524] text-white"
+                ? "bg-brand-soft text-brand-active ring-1 ring-brand"
                 : "text-[#737373] hover:text-[#262626]"
             }`}
           >
-            Việt → Trung (越译中)
+            Việt → Trung
           </button>
           <button
             type="button"
             onClick={() => handleDirectionChange("zh-to-vi")}
-            className={`cursor-pointer rounded-xl px-4 py-2 text-xs font-semibold transition-colors ${
+            className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
               direction === "zh-to-vi"
-                ? "bg-[#292524] text-white"
+                ? "bg-brand-soft text-brand-active ring-1 ring-brand"
                 : "text-[#737373] hover:text-[#262626]"
             }`}
           >
-            Trung → Việt (中译越)
+            Trung → Việt
           </button>
         </div>
       </div>
 
-      {/* HSK0 -> HSK9 Level + SubDifficulty Filter */}
-      <div className="space-y-3 rounded-2xl border border-[#E5E5E0] bg-white p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-[#737373]">
-              Cấp độ:
+      {/* Unified Single-Row Filter & Settings Bar */}
+      <UnifiedFilterBar
+        hskLevel={selectedLevel}
+        onHskLevelChange={(lvl) =>
+          handleLevelChange(lvl as "ALL" | HSKLevel | "HSK7-9")
+        }
+        allowAllLevel
+        difficulty={subFilter}
+        onDifficultyChange={(val) =>
+          handleSubFilterChange(val as "all" | SubDifficulty)
+        }
+        difficultyOptions={[
+          {
+            value: "all",
+            label: `Tất cả mức (${levelExercises.length})`,
+            shortLabel: "Độ khó",
+          },
+          {
+            value: "basic",
+            label: `Cơ bản (${basicCount})`,
+            shortLabel: "Cơ bản",
+          },
+          {
+            value: "advanced",
+            label: `Nâng cao (${advancedCount})`,
+            shortLabel: "Nâng cao",
+          },
+        ]}
+        rightSlot={
+          <span className="whitespace-nowrap text-[11px] font-medium text-[#737373]">
+            {filteredExercises.length} bài dịch
+          </span>
+        }
+        settingsBadge={showPinyin ? "Pinyin" : undefined}
+        settingsAriaLabel="Cài đặt luyện dịch"
+        settingsContent={
+          <label className="flex cursor-pointer items-center justify-between text-xs font-semibold text-[#4A4540]">
+            <span className="inline-flex items-center gap-1.5">
+              <Languages className="h-3.5 w-3.5" /> Hiện phiên âm Pinyin
             </span>
-            {HSK_LEVELS.map((lvl) => (
-              <button
-                key={lvl}
-                type="button"
-                onClick={() => handleLevelChange(lvl)}
-                className={`cursor-pointer rounded-xl px-3 py-1.5 text-xs font-semibold transition-all ${
-                  selectedLevel === lvl
-                    ? "bg-[#292524] text-white"
-                    : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-[#6B655E]"
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showPinyin}
+              onClick={() => setShowPinyin((prev) => !prev)}
+              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors ${
+                showPinyin ? "bg-brand" : "bg-[#D6D3CD]"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+                  showPinyin ? "left-[18px]" : "left-0.5"
                 }`}
-              >
-                {lvl === "ALL"
-                  ? "Tất cả"
-                  : lvl === "HSK0"
-                    ? "Mức 0"
-                    : lvl === "HSK7-9"
-                      ? "HSK 7–9"
-                      : lvl.replace("HSK", "HSK ")}
-              </button>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setShowPinyin((prev) => !prev)}
-            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors ${
-              showPinyin
-                ? "border-[#6B655E] bg-[#6B655E] text-white"
-                : "border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540]"
-            }`}
-          >
-            <Languages className="h-3.5 w-3.5" />
-            {showPinyin ? "Pinyin: BẬT" : "Pinyin: TẮT"}
-          </button>
-        </div>
-
-        {/* Sub-Difficulty Filter */}
-        <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-3">
-          {(
-            [
-              {
-                id: "all" as const,
-                label: "Tất cả bài dịch",
-                count: levelExercises.length,
-              },
-              {
-                id: "basic" as const,
-                label: "Cơ bản (Basic)",
-                count: basicCount,
-              },
-              {
-                id: "advanced" as const,
-                label: "Nâng cao (Advanced)",
-                count: advancedCount,
-              },
-            ]
-          ).map((sub) => {
-            const active = subFilter === sub.id;
-            return (
-              <button
-                key={sub.id}
-                type="button"
-                onClick={() => handleSubFilterChange(sub.id)}
-                className={`flex cursor-pointer items-center justify-between gap-2 rounded-xl px-4 py-2.5 text-left transition-all ${
-                  active
-                    ? "bg-[#6B655E] text-white shadow-xs"
-                    : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#57534E] hover:bg-[#F2F2F0] hover:text-[#262626]"
-                }`}
-              >
-                <span className="text-xs font-semibold sm:text-sm">
-                  {sub.label}
-                </span>
-                <span
-                  className={`rounded-lg px-2 py-0.5 text-[11px] font-medium ${
-                    active
-                      ? "bg-white/15 text-[#F5F5F4]"
-                      : "bg-white text-[#737373]"
-                  }`}
-                >
-                  {sub.count} bài
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+              />
+            </button>
+          </label>
+        }
+      />
 
       {currentExercise && (
         <>

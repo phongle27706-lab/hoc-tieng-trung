@@ -2,13 +2,17 @@
 
 import React, { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { SlidersHorizontal, Sparkles, X } from "lucide-react";
 import {
   EDITORIAL_EASE,
   FadeInUp,
   StaggerContainer,
   StaggerItem,
 } from "@/components/ui/MotionPrimitives";
+import {
+  UnifiedFilterBar,
+  type UnifiedOption,
+} from "@/components/ui/UnifiedFilterBar";
 import { ResourceBanner } from "@/components/resources/ResourceBanner";
 import { getResourcesByCategory } from "@/data/resources";
 import { ALL_STUDY_SESSIONS, ROADMAP_STAGES } from "@/data/roadmap";
@@ -32,28 +36,16 @@ import {
   type SubDifficultyFilter,
 } from "./StageTimeline";
 
-const LEVEL_PILLS: { id: string; label: string }[] = [
-  { id: "ALL", label: "Tất cả" },
-  { id: "HSK0", label: "HSK 0" },
-  { id: "HSK1", label: "HSK 1" },
-  { id: "HSK2", label: "HSK 2" },
-  { id: "HSK3", label: "HSK 3" },
-  { id: "HSK4", label: "HSK 4" },
-  { id: "HSK5", label: "HSK 5" },
-  { id: "HSK6", label: "HSK 6" },
-  { id: "HSK7-9", label: "HSK 7–9" },
+const SUB_DIFFICULTY_OPTIONS: UnifiedOption<SubDifficultyFilter>[] = [
+  { value: "all", label: "Tất cả mức", shortLabel: "Độ khó" },
+  { value: "basic", label: "Cơ bản", shortLabel: "Cơ bản" },
+  { value: "advanced", label: "Nâng cao", shortLabel: "Nâng cao" },
 ];
 
-const SUB_DIFFICULTY_OPTIONS: { id: SubDifficultyFilter; label: string }[] = [
-  { id: "all", label: "Tất cả mức" },
-  { id: "basic", label: "Cơ bản" },
-  { id: "advanced", label: "Nâng cao" },
-];
-
-const COMPLETION_OPTIONS: { id: CompletionFilter; label: string }[] = [
-  { id: "all", label: "Tất cả" },
-  { id: "todo", label: "Chưa học" },
-  { id: "done", label: "Đã xong" },
+const COMPLETION_OPTIONS: UnifiedOption<CompletionFilter>[] = [
+  { value: "all", label: "Tất cả trạng thái", shortLabel: "Lọc" },
+  { value: "todo", label: "Chưa học", shortLabel: "Chưa học" },
+  { value: "done", label: "Đã xong", shortLabel: "Đã xong" },
 ];
 
 export function RoadmapClient() {
@@ -131,7 +123,7 @@ export function RoadmapClient() {
     STARTING_LEVEL_OPTIONS[0];
 
   return (
-    <StaggerContainer className="mx-auto w-full max-w-4xl min-w-0 space-y-6 overflow-x-hidden px-4 py-8 sm:px-6">
+    <StaggerContainer className="mx-auto w-full max-w-4xl min-w-0 space-y-5 overflow-x-clip px-4 py-8 sm:px-6">
       {/* Minimalist Page Header */}
       <StaggerItem className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
@@ -211,104 +203,24 @@ export function RoadmapClient() {
         </div>
       </StaggerItem>
 
-      {/* Level Filter Pills + SubDifficulty + Search + Completion Filter */}
-      <StaggerItem className="space-y-3 rounded-2xl border border-[#E5E5E0] bg-white p-4">
-        {/* Level Pills (Tất cả, Mức 0, HSK 1..9) */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {LEVEL_PILLS.map((pill) => {
-            const active = levelFilter === pill.id;
-            return (
-              <button
-                key={pill.id}
-                type="button"
-                onClick={() => setLevelFilter(pill.id)}
-                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${
-                  active
-                    ? "bg-brand-soft text-brand-active ring-1 ring-brand"
-                    : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-brand hover:bg-[#F2F2F0]"
-                }`}
-              >
-                {pill.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Search Input + SubDifficulty + Completion Filter */}
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#737373]" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm bài học, chữ Hán, Pinyin..."
-              className="w-full rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] py-2 pl-9 pr-8 text-sm text-[#262626] placeholder:text-[#737373] transition-colors focus:border-brand focus:bg-white focus:outline-none"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery("")}
-                aria-label="Xóa tìm kiếm"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-0.5 text-[#737373] hover:text-[#262626] cursor-pointer"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Cơ bản / Nâng cao filter */}
-            <div
-              className="inline-flex shrink-0 items-center rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-1"
-              role="group"
-              aria-label="Lọc theo độ khó Cơ bản / Nâng cao"
-            >
-              {SUB_DIFFICULTY_OPTIONS.map((opt) => {
-                const active = subDifficultyFilter === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setSubDifficultyFilter(opt.id)}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                      active
-                        ? "bg-[#6B655E] text-white"
-                        : "text-[#737373] hover:text-[#262626]"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Completion status filter */}
-            <div
-              className="inline-flex shrink-0 items-center rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-1"
-              role="group"
-              aria-label="Lọc theo trạng thái hoàn thành"
-            >
-              {COMPLETION_OPTIONS.map((opt) => {
-                const active = completionFilter === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setCompletionFilter(opt.id)}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${
-                      active
-                        ? "bg-white text-brand-active ring-1 ring-brand shadow-xs"
-                        : "text-[#737373] hover:text-[#262626]"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+      {/* Unified Single-Row Filter Bar: Search + Grouped HSK + Difficulty + Status */}
+      <StaggerItem>
+        <UnifiedFilterBar
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchPlaceholder="Tìm bài học, chữ Hán, Pinyin..."
+          hskLevel={levelFilter}
+          onHskLevelChange={setLevelFilter}
+          allowAllLevel
+          difficulty={subDifficultyFilter}
+          onDifficultyChange={(v) =>
+            setSubDifficultyFilter(v as SubDifficultyFilter)
+          }
+          difficultyOptions={SUB_DIFFICULTY_OPTIONS}
+          status={completionFilter}
+          onStatusChange={(v) => setCompletionFilter(v as CompletionFilter)}
+          statusOptions={COMPLETION_OPTIONS}
+        />
       </StaggerItem>
 
       {/* Accordion Timeline */}
@@ -318,6 +230,7 @@ export function RoadmapClient() {
           sessions={sessionsList}
           completedSessionIds={completedSessionIds}
           skillWeights={profile.skillWeights}
+          startingLevel={profile.startingLevel}
           levelFilter={levelFilter}
           subDifficultyFilter={subDifficultyFilter}
           searchQuery={searchQuery}

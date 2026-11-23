@@ -27,6 +27,7 @@ import { getOfflineDictionaryEntries } from "@/data/chinese/dictionary";
 import { HanziStrokeCanvas } from "@/components/writing/HanziStrokeCanvas";
 import { TwoSentenceBuilder } from "@/components/writing/TwoSentenceBuilder";
 import { InteractiveChineseText } from "@/components/dictionary/InteractiveChineseText";
+import { UnifiedFilterBar } from "@/components/ui/UnifiedFilterBar";
 import { speakChinese } from "@/lib/speech";
 import { addXP, markLessonCompleted, recordMistake } from "@/lib/storage";
 import type { DictionaryEntry, HSKLevel, SubDifficulty } from "@/types";
@@ -483,19 +484,20 @@ export default function WritingPage() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 pb-12">
-      {/* Header & 4 Tabs */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wider text-[#737373]">
-            写作与汉字 · Luyện Viết Chữ Hán &amp; Ngữ Pháp Toàn Diện (Mức 0 – HSK 9)
-          </p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[#262626] sm:text-3xl">
-            Luyện Viết Chữ Hán (米字格) &amp; Đặt Câu – Viết Luận
+    <div className="mx-auto max-w-5xl space-y-4 pb-12">
+      {/* Compact Header & 4 Tabs */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-2">
+          <PenTool className="h-4 w-4 text-brand" />
+          <h1 className="text-lg font-bold tracking-tight text-[#262626] sm:text-xl">
+            Luyện Viết Chữ Hán &amp; Đặt Câu
           </h1>
+          <span className="hidden text-xs font-medium text-[#737373] sm:inline">
+            写作与汉字 · Mức 0 – HSK 9
+          </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-1.5 rounded-2xl border border-[#E5E5E0] bg-white p-1.5 sm:flex sm:flex-wrap">
+        <div className="grid grid-cols-2 gap-1 rounded-2xl border border-[#E5E5E0] bg-white p-1 sm:flex sm:flex-wrap">
           {(
             [
               {
@@ -527,9 +529,9 @@ export default function WritingPage() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors ${
+                className={`inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors ${
                   active
-                    ? "bg-[#292524] text-white"
+                    ? "bg-brand-soft text-brand-active ring-1 ring-brand"
                     : "text-[#737373] hover:bg-[#FAF9F7] hover:text-[#262626]"
                 }`}
               >
@@ -545,102 +547,49 @@ export default function WritingPage() {
       {/* TAB 1: STROKE ORDER CANVAS (VẼ CHỮ HÁN CHẤM NÉT - 米字格) */}
       {/* ========================================================= */}
       {activeTab === "stroke" && (
-        <div className="space-y-5">
-          {/* Level + Sub-Difficulty + Custom Hanzi Input */}
-          <div className="space-y-3 rounded-2xl border border-[#E5E5E0] bg-white p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-[#737373]">
-                  Cấp độ chữ Hán:
-                </span>
-                {(["ALL", ...HSK_LEVELS] as const).map((lvl) => (
-                  <button
-                    key={lvl}
-                    type="button"
-                    onClick={() => {
-                      setStrokeLevel(lvl);
-                      const first =
-                        lvl === "ALL"
-                          ? strokeBankList[0]
-                          : lvl === "HSK7-9"
-                            ? strokeBankList.find((c) =>
-                                ["HSK7", "HSK8", "HSK9"].includes(c.level)
-                              )
-                            : strokeBankList.find((c) => c.level === lvl);
-                      if (first) setSelectedCharHanzi(first.hanzi);
-                    }}
-                    className={`cursor-pointer rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
-                      strokeLevel === lvl
-                        ? "bg-[#292524] text-white"
-                        : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-[#6B655E]"
-                    }`}
-                  >
-                    {lvl === "ALL"
-                      ? "Tất cả"
-                      : lvl === "HSK0"
-                        ? "Mức 0 (HSK0)"
-                        : lvl}
-                  </button>
-                ))}
-              </div>
+        <div className="space-y-4">
+          {/* Unified Single-Row Filter + Custom Hanzi Input */}
+          <UnifiedFilterBar
+            searchQuery={customHanziInput}
+            onSearchChange={setCustomHanziInput}
+            searchPlaceholder="Nhập chữ Hán muốn luyện (VD: 永, 爱, 贸易)..."
+            hskLevel={strokeLevel}
+            onHskLevelChange={(lvl) => {
+              const nextLvl = lvl as "ALL" | HSKLevel | "HSK7-9";
+              setStrokeLevel(nextLvl);
+              const first =
+                nextLvl === "ALL"
+                  ? strokeBankList[0]
+                  : nextLvl === "HSK7-9"
+                    ? strokeBankList.find((c) =>
+                        ["HSK7", "HSK8", "HSK9"].includes(c.level)
+                      )
+                    : strokeBankList.find((c) => c.level === nextLvl);
+              if (first) setSelectedCharHanzi(first.hanzi);
+            }}
+            allowAllLevel
+            difficulty={strokeSubFilter}
+            onDifficultyChange={(val) =>
+              setStrokeSubFilter(val as "all" | SubDifficulty)
+            }
+            rightSlot={
+              <button
+                type="button"
+                onClick={() => {
+                  const cleaned = customHanziInput.trim();
+                  if (cleaned) setSelectedCharHanzi(cleaned);
+                }}
+                disabled={!customHanziInput.trim()}
+                className="h-8 shrink-0 cursor-pointer rounded-xl bg-brand px-3 text-xs font-semibold text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                Luyện
+              </button>
+            }
+          />
 
-              <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
-                {(
-                  [
-                    { id: "all" as const, label: "Tất cả" },
-                    { id: "basic" as const, label: "Cơ bản" },
-                    { id: "advanced" as const, label: "Nâng cao" },
-                  ]
-                ).map((sub) => (
-                  <button
-                    key={sub.id}
-                    type="button"
-                    onClick={() => setStrokeSubFilter(sub.id)}
-                    className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
-                      strokeSubFilter === sub.id
-                        ? "bg-[#6B655E] text-white"
-                        : "text-[#737373] hover:text-[#262626]"
-                    }`}
-                  >
-                    {sub.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Custom Character Input */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#F2F2F0] pt-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-semibold text-[#4A4540]">
-                  Nhập bất kỳ chữ Hán / từ vựng nào muốn luyện:
-                </span>
-                <input
-                  type="text"
-                  value={customHanziInput}
-                  onChange={(e) => setCustomHanziInput(e.target.value)}
-                  placeholder="VD: 永, 爱, 贸易, 举一反三..."
-                  className="w-48 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-3 py-1.5 text-sm text-[#262626] focus:border-[#6B655E] focus:bg-white focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const cleaned = customHanziInput.trim();
-                    if (cleaned) {
-                      setSelectedCharHanzi(cleaned);
-                    }
-                  }}
-                  className="cursor-pointer rounded-xl bg-[#292524] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#4A4540]"
-                >
-                  Luyện viết chữ này
-                </button>
-              </div>
-              <span className="text-xs text-[#737373]">
-                Chấm từng nét trực tiếp: sai ở nét nào báo đỏ ngay nét đó!
-              </span>
-            </div>
-
-            {/* Character Bank Grid */}
-            <div className="flex flex-wrap gap-1.5 pt-1">
+          {/* Compact Character Bank Strip */}
+          <div className="rounded-2xl border border-[#E5E5E0] bg-white p-3">
+            <div className="flex flex-wrap gap-1.5">
               {filteredStrokeBank.map((item) => {
                 const active = selectedCharHanzi === item.hanzi;
                 return (
@@ -650,14 +599,14 @@ export default function WritingPage() {
                     onClick={() => setSelectedCharHanzi(item.hanzi)}
                     className={`flex cursor-pointer flex-col items-center rounded-xl border px-3 py-1.5 transition-all ${
                       active
-                        ? "border-[#292524] bg-[#292524] text-white shadow-xs"
-                        : "border-[#E5E5E0] bg-[#FAF9F7] text-[#262626] hover:border-[#6B655E] hover:bg-white"
+                        ? "border-brand bg-brand-soft text-brand-active shadow-xs"
+                        : "border-[#E5E5E0] bg-[#FAF9F7] text-[#262626] hover:border-brand hover:bg-white"
                     }`}
                   >
                     <span className="text-lg font-bold">{item.hanzi}</span>
                     <span
                       className={`text-[10px] ${
-                        active ? "text-stone-300" : "text-[#737373]"
+                        active ? "text-brand-active/80" : "text-[#737373]"
                       }`}
                     >
                       {item.pinyin}
@@ -671,8 +620,11 @@ export default function WritingPage() {
           {/* Interactive Stroke Canvas Component */}
           <HanziStrokeCanvas
             hanzi={selectedCharHanzi}
-            pinyin={matchedStrokeItem?.pinyin}
-            meaningVi={matchedStrokeItem?.meaningVi}
+            pinyin={matchedStrokeItem?.pinyin ?? (selectedCharHanzi === "永" ? "yǒng" : undefined)}
+            meaningVi={
+              matchedStrokeItem?.meaningVi ??
+              (selectedCharHanzi === "永" ? "vĩnh cửu, mãi mãi" : undefined)
+            }
           />
         </div>
       )}
@@ -681,33 +633,25 @@ export default function WritingPage() {
       {/* TAB 2: ĐẶT 2 CÂU HOÀN CHỈNH VỚI TỪ VỰNG MỚI */}
       {/* ========================================================= */}
       {activeTab === "two-sentences" && (
-        <div className="space-y-5">
-          <div className="space-y-3 rounded-2xl border border-[#E5E5E0] bg-white p-4">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-[#737373]">
-                Chọn cấp độ từ vựng:
+        <div className="space-y-4">
+          <UnifiedFilterBar
+            hskLevel={twoSentLevel}
+            onHskLevelChange={(lvl) => {
+              const nextLvl = lvl as HSKLevel | "HSK7-9";
+              setTwoSentLevel(nextLvl);
+              const first = allDictEntries.find((e) => e.level === nextLvl);
+              if (first) setSelectedVocabWord(first.hanzi);
+            }}
+            allowAllLevel={false}
+            rightSlot={
+              <span className="whitespace-nowrap text-[11px] font-medium text-[#737373]">
+                {levelVocabEntries.length} từ vựng
               </span>
-              {HSK_LEVELS.map((lvl) => (
-                <button
-                  key={lvl}
-                  type="button"
-                  onClick={() => {
-                    setTwoSentLevel(lvl);
-                    const first = allDictEntries.find((e) => e.level === lvl);
-                    if (first) setSelectedVocabWord(first.hanzi);
-                  }}
-                  className={`cursor-pointer rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
-                    twoSentLevel === lvl
-                      ? "bg-[#292524] text-white"
-                      : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-[#6B655E]"
-                  }`}
-                >
-                  {lvl === "HSK0" ? "Mức 0 (HSK0)" : lvl}
-                </button>
-              ))}
-            </div>
+            }
+          />
 
-            <div className="flex flex-wrap gap-2 border-t border-[#F2F2F0] pt-3">
+          <div className="rounded-2xl border border-[#E5E5E0] bg-white p-3">
+            <div className="flex flex-wrap gap-2">
               {levelVocabEntries.slice(0, 24).map((entry) => {
                 const active = activeVocabEntry.hanzi === entry.hanzi;
                 return (
@@ -717,14 +661,14 @@ export default function WritingPage() {
                     onClick={() => setSelectedVocabWord(entry.hanzi)}
                     className={`cursor-pointer rounded-xl border px-3 py-1.5 text-left transition-colors ${
                       active
-                        ? "border-[#292524] bg-[#292524] text-white"
-                        : "border-[#E5E5E0] bg-[#FAF9F7] text-[#262626] hover:border-[#6B655E]"
+                        ? "border-brand bg-brand-soft text-brand-active"
+                        : "border-[#E5E5E0] bg-[#FAF9F7] text-[#262626] hover:border-brand"
                     }`}
                   >
                     <div className="text-sm font-bold">{entry.hanzi}</div>
                     <div
                       className={`text-[10px] ${
-                        active ? "text-stone-300" : "text-[#737373]"
+                        active ? "text-[#4A4540]" : "text-[#737373]"
                       }`}
                     >
                       {entry.pinyin} · {entry.meaningVi.split(";")[0]}
@@ -747,68 +691,27 @@ export default function WritingPage() {
       {/* TAB 3: SẮP XẾP TỪ THÀNH CÂU (SENTENCE_ORDER_EXERCISES) */}
       {/* ========================================================= */}
       {activeTab === "sentence-order" && (
-        <div className="space-y-5">
-          <div className="space-y-3 rounded-2xl border border-[#E5E5E0] bg-white p-4">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-[#737373]">
-                Cấp độ:
+        <div className="space-y-4">
+          <UnifiedFilterBar
+            hskLevel={soLevel}
+            onHskLevelChange={(lvl) => {
+              setSoLevel(lvl as "ALL" | HSKLevel | "HSK7-9");
+              setSoIndex(0);
+              handleResetOrder();
+            }}
+            allowAllLevel
+            difficulty={soSubFilter}
+            onDifficultyChange={(val) => {
+              setSoSubFilter(val as "all" | SubDifficulty);
+              setSoIndex(0);
+              handleResetOrder();
+            }}
+            rightSlot={
+              <span className="whitespace-nowrap text-[11px] font-medium text-[#737373]">
+                {filteredOrderExercises.length} câu
               </span>
-              {(["ALL", ...HSK_LEVELS] as const).map((lvl) => (
-                <button
-                  key={lvl}
-                  type="button"
-                  onClick={() => {
-                    setSoLevel(lvl);
-                    setSoIndex(0);
-                    handleResetOrder();
-                  }}
-                  className={`cursor-pointer rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
-                    soLevel === lvl
-                      ? "bg-[#292524] text-white"
-                      : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-[#6B655E]"
-                  }`}
-                >
-                  {lvl === "ALL"
-                    ? "Tất cả"
-                    : lvl === "HSK0"
-                      ? "Mức 0 (HSK0)"
-                      : lvl}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#F2F2F0] pt-3">
-              <span className="text-xs font-semibold uppercase tracking-wider text-[#737373]">
-                Độ khó con:
-              </span>
-              <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-1">
-                {(
-                  [
-                    { id: "all" as const, label: "Tất cả" },
-                    { id: "basic" as const, label: "Cơ bản" },
-                    { id: "advanced" as const, label: "Nâng cao" },
-                  ]
-                ).map((sub) => (
-                  <button
-                    key={sub.id}
-                    type="button"
-                    onClick={() => {
-                      setSoSubFilter(sub.id);
-                      setSoIndex(0);
-                      handleResetOrder();
-                    }}
-                    className={`cursor-pointer rounded-lg px-3 py-1 text-xs font-semibold transition-colors ${
-                      soSubFilter === sub.id
-                        ? "bg-[#6B655E] text-white"
-                        : "text-[#737373] hover:text-[#262626]"
-                    }`}
-                  >
-                    {sub.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+            }
+          />
 
           {currentOrderEx && (
             <div className="space-y-6 rounded-2xl border border-[#E5E5E0] bg-white p-6 sm:p-8">

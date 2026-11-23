@@ -11,13 +11,13 @@ import {
   Lightbulb,
   Play,
   RotateCcw,
-  Settings,
   Volume2,
   XCircle,
 } from "lucide-react";
 import { InteractiveChineseText } from "@/components/dictionary/InteractiveChineseText";
 import { ResourceBanner } from "@/components/resources/ResourceBanner";
 import { TACTILE_SPRING } from "@/components/ui/MotionPrimitives";
+import { UnifiedFilterBar } from "@/components/ui/UnifiedFilterBar";
 import { getResourcesByCategory } from "@/data/resources";
 import {
   DICTATION_LESSONS,
@@ -461,7 +461,7 @@ export default function ListeningPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-3 pb-12">
-      {/* Compact Header: title + mode toggle + ⚙️ settings popover */}
+      {/* Compact Header: title + mode toggle */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-bold tracking-tight text-[#262626] sm:text-xl">
           {mode === "dictation" ? "Nghe điền từ" : "Nghe hiểu HSK"}
@@ -470,270 +470,260 @@ export default function ListeningPage() {
           </span>
         </h1>
 
-        <div className="flex items-center gap-1.5">
-          <div
-            role="tablist"
-            className="inline-flex rounded-xl border border-[#E5E5E0] bg-white p-0.5"
-          >
-            {(
-              [
-                { id: "dictation" as const, label: "Điền từ" },
-                { id: "tasks" as const, label: "4 Task HSK" },
-              ]
-            ).map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                role="tab"
-                aria-selected={mode === m.id}
-                onClick={() => {
-                  stopSpeaking();
-                  setPlayingId(null);
-                  setMode(m.id);
-                }}
-                className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  mode === m.id
-                    ? "bg-brand-soft text-brand-active ring-1 ring-brand"
-                    : "text-[#737373] hover:text-[#262626]"
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-
-          <span className="hidden rounded-lg border border-[#E5E5E0] bg-white px-2 py-1.5 text-xs font-semibold text-[#4A4540] sm:inline">
-            {speed}x
-          </span>
-
-          <div className="relative">
+        <div
+          role="tablist"
+          className="inline-flex rounded-xl border border-[#E5E5E0] bg-white p-0.5"
+        >
+          {(
+            [
+              { id: "dictation" as const, label: "Điền từ" },
+              { id: "tasks" as const, label: "4 Task HSK" },
+            ]
+          ).map((m) => (
             <button
+              key={m.id}
               type="button"
-              onClick={() => setSettingsOpen((o) => !o)}
-              aria-expanded={settingsOpen}
-              aria-label="Cài đặt nghe"
-              title="Cài đặt: tốc độ, giọng đọc, Pinyin, độ khó"
-              className={`inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border transition-colors ${
-                settingsOpen
-                  ? "border-brand bg-brand-soft text-brand-active"
-                  : "border-[#E5E5E0] bg-white text-[#4A4540] hover:bg-[#F2F2F0]"
+              role="tab"
+              aria-selected={mode === m.id}
+              onClick={() => {
+                stopSpeaking();
+                setPlayingId(null);
+                setMode(m.id);
+              }}
+              className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                mode === m.id
+                  ? "bg-brand-soft text-brand-active ring-1 ring-brand"
+                  : "text-[#737373] hover:text-[#262626]"
               }`}
             >
-              <Settings className="h-4 w-4" />
+              {m.label}
             </button>
+          ))}
+        </div>
+      </div>
 
-            {settingsOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-30"
-                  onClick={() => setSettingsOpen(false)}
-                  aria-hidden
+      {/* Unified Single-Row Filter & Settings Bar */}
+      <UnifiedFilterBar
+        hskLevel={mode === "dictation" ? dictLevel : taskLevel}
+        onHskLevelChange={(lvl) => {
+          if (mode === "dictation") {
+            handleChangeDictLevel(lvl as "ALL" | HSKLevel | "HSK7-9");
+          } else {
+            stopSpeaking();
+            setPlayingId(null);
+            setTaskLevel(lvl as "ALL" | HSKLevel | "HSK7-9");
+          }
+        }}
+        allowAllLevel
+        difficulty={mode === "dictation" ? dictSubFilter : taskSubFilter}
+        onDifficultyChange={(val) => {
+          stopSpeaking();
+          setPlayingId(null);
+          if (mode === "dictation") {
+            setDictSubFilter(val as "all" | SubDifficulty);
+            resetLessonProgress();
+          } else {
+            setTaskSubFilter(val as "all" | SubDifficulty);
+          }
+        }}
+        difficultyOptions={
+          mode === "dictation"
+            ? [
+                { value: "all", label: "Tất cả mức", shortLabel: "Độ khó" },
+                { value: "basic", label: "Cơ bản", shortLabel: "Cơ bản" },
+                { value: "advanced", label: "Nâng cao", shortLabel: "Nâng cao" },
+              ]
+            : [
+                {
+                  value: "all",
+                  label: `Tất cả mức (${levelFilteredTasks.length})`,
+                  shortLabel: "Độ khó",
+                },
+                {
+                  value: "basic",
+                  label: `Cơ bản (${basicTaskCount})`,
+                  shortLabel: "Cơ bản",
+                },
+                {
+                  value: "advanced",
+                  label: `Nâng cao (${advancedTaskCount})`,
+                  shortLabel: "Nâng cao",
+                },
+              ]
+        }
+        rightSlot={
+          <span className="whitespace-nowrap text-[11px] font-medium text-[#737373]">
+            {mode === "dictation"
+              ? `${levelLessons.length} bài`
+              : `${tasks.length} câu`}
+          </span>
+        }
+        settingsBadge={`${speed}x`}
+        settingsAriaLabel="Cài đặt nghe: tốc độ, giọng đọc, Pinyin, độ khó, mức ẩn từ"
+        settingsContent={
+          <>
+            <div className="space-y-1.5">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-[#4A4540]">
+                <Headphones className="h-3.5 w-3.5" /> Tốc độ đọc
+              </span>
+              <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
+                {SPEEDS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setSpeed(s)}
+                    className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+                      speed === s
+                        ? "bg-white text-brand-active ring-1 ring-brand"
+                        : "text-[#737373] hover:text-[#262626]"
+                    }`}
+                  >
+                    {s}x
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label
+                htmlFor="listening-zh-voice"
+                className="block text-xs font-semibold text-[#4A4540]"
+              >
+                Giọng đọc tiếng Trung
+              </label>
+              <select
+                id="listening-zh-voice"
+                value={selectedZhVoice}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedZhVoice(val);
+                  setPreferredVoiceName("zh", val || undefined);
+                }}
+                className="w-full rounded-lg border border-[#E5E5E0] bg-white px-2.5 py-1.5 text-xs text-[#262626] focus:border-brand focus:outline-none"
+              >
+                <option value="">Tự động chọn giọng chuẩn nhất</option>
+                {zhVoices.map((v) => (
+                  <option key={v.name} value={v.name}>
+                    {getFriendlyVoiceLabel(v)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <label className="flex cursor-pointer items-center justify-between text-xs font-semibold text-[#4A4540]">
+              <span className="inline-flex items-center gap-1.5">
+                <Languages className="h-3.5 w-3.5" /> Hiện Pinyin
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={
+                  mode === "dictation" ? globalShowPinyin : taskShowPinyin
+                }
+                onClick={() =>
+                  mode === "dictation"
+                    ? setGlobalShowPinyin((p) => !p)
+                    : setTaskShowPinyin((p) => !p)
+                }
+                className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors ${
+                  (mode === "dictation" ? globalShowPinyin : taskShowPinyin)
+                    ? "bg-brand"
+                    : "bg-[#D6D3CD]"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+                    (mode === "dictation" ? globalShowPinyin : taskShowPinyin)
+                      ? "left-[18px]"
+                      : "left-0.5"
+                  }`}
                 />
-                <div className="absolute right-0 z-40 mt-2 w-[min(21rem,calc(100vw-2rem))] space-y-3 rounded-2xl border border-[#E5E5E0] bg-white p-4 shadow-lg">
-                  <div className="space-y-1.5">
-                    <span className="flex items-center gap-1.5 text-xs font-semibold text-[#4A4540]">
-                      <Headphones className="h-3.5 w-3.5" /> Tốc độ đọc
-                    </span>
-                    <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
-                      {SPEEDS.map((s) => (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => setSpeed(s)}
-                          className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
-                            speed === s
-                              ? "bg-white text-brand-active ring-1 ring-brand"
-                              : "text-[#737373] hover:text-[#262626]"
-                          }`}
-                        >
-                          {s}x
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+              </button>
+            </label>
 
-                  <div className="space-y-1">
-                    <label
-                      htmlFor="listening-zh-voice"
-                      className="block text-xs font-semibold text-[#4A4540]"
-                    >
-                      Giọng đọc tiếng Trung
-                    </label>
-                    <select
-                      id="listening-zh-voice"
-                      value={selectedZhVoice}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setSelectedZhVoice(val);
-                        setPreferredVoiceName("zh", val || undefined);
-                      }}
-                      className="w-full rounded-lg border border-[#E5E5E0] bg-white px-2.5 py-1.5 text-xs text-[#262626] focus:border-brand focus:outline-none"
-                    >
-                      <option value="">Tự động chọn giọng chuẩn nhất</option>
-                      {zhVoices.map((v) => (
-                        <option key={v.name} value={v.name}>
-                          {getFriendlyVoiceLabel(v)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+            <label className="flex cursor-pointer items-center justify-between text-xs font-semibold text-[#4A4540]">
+              <span>Tự động chuyển câu tiếp</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoAdvance}
+                onClick={() => setAutoAdvance((v) => !v)}
+                className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors ${
+                  autoAdvance ? "bg-brand" : "bg-[#D6D3CD]"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+                    autoAdvance ? "left-[18px]" : "left-0.5"
+                  }`}
+                />
+              </button>
+            </label>
 
-                  <label className="flex cursor-pointer items-center justify-between text-xs font-semibold text-[#4A4540]">
-                    <span className="inline-flex items-center gap-1.5">
-                      <Languages className="h-3.5 w-3.5" /> Hiện Pinyin
-                    </span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={
-                        mode === "dictation" ? globalShowPinyin : taskShowPinyin
-                      }
-                      onClick={() =>
-                        mode === "dictation"
-                          ? setGlobalShowPinyin((p) => !p)
-                          : setTaskShowPinyin((p) => !p)
-                      }
-                      className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors ${
-                        (mode === "dictation"
-                          ? globalShowPinyin
-                          : taskShowPinyin)
-                          ? "bg-emerald-500"
-                          : "bg-[#D6D3CD]"
-                      }`}
-                    >
-                      <span
-                        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
-                          (mode === "dictation"
-                            ? globalShowPinyin
-                            : taskShowPinyin)
-                            ? "left-[18px]"
-                            : "left-0.5"
+            {mode === "dictation" && (
+              <>
+                <div className="space-y-1.5 border-t border-[#F2F2F0] pt-3">
+                  <span className="block text-xs font-semibold text-[#4A4540]">
+                    Độ khó con
+                  </span>
+                  <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
+                    {(
+                      [
+                        { id: "all" as const, label: "Tất cả" },
+                        { id: "basic" as const, label: "Cơ bản" },
+                        { id: "advanced" as const, label: "Nâng cao" },
+                      ]
+                    ).map((sub) => (
+                      <button
+                        key={sub.id}
+                        type="button"
+                        onClick={() => {
+                          stopSpeaking();
+                          setPlayingId(null);
+                          setDictSubFilter(sub.id);
+                          resetLessonProgress();
+                        }}
+                        className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
+                          dictSubFilter === sub.id
+                            ? "bg-white text-brand-active ring-1 ring-brand"
+                            : "text-[#737373] hover:text-[#262626]"
                         }`}
-                      />
-                    </button>
-                  </label>
-
-                  <label className="flex cursor-pointer items-center justify-between text-xs font-semibold text-[#4A4540]">
-                    <span>Tự động chuyển câu tiếp</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={autoAdvance}
-                      onClick={() => setAutoAdvance((v) => !v)}
-                      className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors ${
-                        autoAdvance ? "bg-emerald-500" : "bg-[#D6D3CD]"
-                      }`}
-                    >
-                      <span
-                        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
-                          autoAdvance ? "left-[18px]" : "left-0.5"
+                      >
+                        {sub.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <span className="block text-xs font-semibold text-[#4A4540]">
+                    Mức ẩn từ
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {BLANK_RATIOS.map((r) => (
+                      <button
+                        key={r.value}
+                        type="button"
+                        onClick={() => handleChangeRatio(r.value)}
+                        className={`cursor-pointer rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                          blankRatio === r.value
+                            ? "bg-brand-soft text-brand-active ring-1 ring-brand"
+                            : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-brand"
                         }`}
-                      />
-                    </button>
-                  </label>
-
-                  {mode === "dictation" && (
-                    <>
-                      <div className="space-y-1.5 border-t border-[#F2F2F0] pt-3">
-                        <span className="block text-xs font-semibold text-[#4A4540]">
-                          Độ khó con
-                        </span>
-                        <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-0.5">
-                          {(
-                            [
-                              { id: "all" as const, label: "Tất cả" },
-                              { id: "basic" as const, label: "Cơ bản" },
-                              { id: "advanced" as const, label: "Nâng cao" },
-                            ]
-                          ).map((sub) => (
-                            <button
-                              key={sub.id}
-                              type="button"
-                              onClick={() => {
-                                stopSpeaking();
-                                setPlayingId(null);
-                                setDictSubFilter(sub.id);
-                                resetLessonProgress();
-                              }}
-                              className={`cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors ${
-                                dictSubFilter === sub.id
-                                  ? "bg-white text-brand-active ring-1 ring-brand"
-                                  : "text-[#737373] hover:text-[#262626]"
-                              }`}
-                            >
-                              {sub.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="space-y-1.5">
-                        <span className="block text-xs font-semibold text-[#4A4540]">
-                          Mức ẩn từ
-                        </span>
-                        <div className="flex flex-wrap gap-1.5">
-                          {BLANK_RATIOS.map((r) => (
-                            <button
-                              key={r.value}
-                              type="button"
-                              onClick={() => handleChangeRatio(r.value)}
-                              className={`cursor-pointer rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                                blankRatio === r.value
-                                  ? "bg-brand-soft text-brand-active ring-1 ring-brand"
-                                  : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-brand"
-                              }`}
-                            >
-                              {r.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <p className="border-t border-[#F2F2F0] pt-2.5 text-[11px] leading-relaxed text-[#737373]">
-                        <kbd className="rounded border border-[#E5E5E0] bg-[#FAF9F7] px-1 font-mono text-[10px] text-[#262626]">
-                          Tab
-                        </kbd>{" "}
-                        tự điền ô trống ·{" "}
-                        <kbd className="rounded border border-[#E5E5E0] bg-[#FAF9F7] px-1 font-mono text-[10px] text-[#262626]">
-                          Enter
-                        </kbd>{" "}
-                        kiểm tra ·{" "}
-                        <kbd className="rounded border border-[#E5E5E0] bg-[#FAF9F7] px-1 font-mono text-[10px] text-[#262626]">
-                          Alt+R
-                        </kbd>{" "}
-                        nghe lại.
-                      </p>
-                    </>
-                  )}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </>
             )}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* ==================== MODE 1: DICTATION ==================== */}
       {mode === "dictation" && (
         <div className="space-y-3">
-          {/* Level Filter (HSK0 -> HSK9) — single scrollable row */}
-          <div className="no-scrollbar -mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-0.5">
-            {(["ALL", ...HSK_LEVELS] as const).map((lvl) => (
-              <button
-                key={lvl}
-                type="button"
-                onClick={() => handleChangeDictLevel(lvl)}
-                className={`shrink-0 cursor-pointer rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
-                  dictLevel === lvl
-                    ? "bg-brand-soft text-brand-active ring-1 ring-brand"
-                    : "border border-[#E5E5E0] bg-white text-[#4A4540] hover:border-brand"
-                }`}
-              >
-                {getLevelDisplayLabel(lvl)}
-              </button>
-            ))}
-            <span className="ml-auto shrink-0 pl-2 text-[11px] text-[#737373]">
-              {levelLessons.length} bài
-            </span>
-          </div>
-
           {/* Lesson Selector — compact horizontal scroll so Câu 1 fits in first viewport */}
           <div className="no-scrollbar -mx-1 flex gap-2 overflow-x-auto px-1 pb-0.5">
             {levelLessons.map((lesson, idx) => {
@@ -802,6 +792,29 @@ export default function ListeningPage() {
                     ? "Đang phát..."
                     : "Nghe cả bài"}
                 </motion.button>
+              </div>
+
+              {/* Single compact keyboard shortcut hint bar at top of exercise */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] px-3.5 py-1.5 text-[11px] text-[#737373]">
+                <span className="font-semibold text-[#4A4540]">Phím tắt:</span>
+                <span>
+                  <kbd className="rounded border border-[#E5E5E0] bg-white px-1.5 py-0.5 font-mono text-[10px] text-[#262626]">
+                    Tab
+                  </kbd>{" "}
+                  điền gợi ý ô trống
+                </span>
+                <span>
+                  <kbd className="rounded border border-[#E5E5E0] bg-white px-1.5 py-0.5 font-mono text-[10px] text-[#262626]">
+                    Enter
+                  </kbd>{" "}
+                  kiểm tra &amp; nhảy ô tiếp
+                </span>
+                <span>
+                  <kbd className="rounded border border-[#E5E5E0] bg-white px-1.5 py-0.5 font-mono text-[10px] text-[#262626]">
+                    Alt+R
+                  </kbd>{" "}
+                  nghe lại câu
+                </span>
               </div>
 
               {/* Sentence Cards */}
@@ -1111,51 +1124,39 @@ export default function ListeningPage() {
                     </div>
 
                     {/* Footer: Pinyin & Translation toggles */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <span className="text-[#737373]">
-                        <kbd className="rounded border border-[#E5E5E0] bg-[#FAF9F7] px-1.5 py-0.5 font-mono text-[10px] text-[#262626]">
-                          Tab
-                        </kbd>{" "}
-                        tự động điền &amp; hiện đáp án ô trống ·{" "}
-                        <kbd className="rounded border border-[#E5E5E0] bg-[#FAF9F7] px-1.5 py-0.5 font-mono text-[10px] text-[#262626]">
-                          Enter
-                        </kbd>{" "}
-                        nhảy sang ô tiếp
-                      </span>
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setShowSentencePinyin((prev) => ({
-                              ...prev,
-                              [sentence.id]: !showPy,
-                            }))
-                          }
-                          className="inline-flex cursor-pointer items-center gap-1 font-medium text-[#6B655E] hover:text-[#262626]"
-                        >
-                          <Languages className="h-3.5 w-3.5" />
-                          {showPy ? "Ẩn Pinyin" : "Hiện Pinyin"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setShowTranslations((prev) => ({
-                              ...prev,
-                              [sentence.id]: !showTrans,
-                            }))
-                          }
-                          className="inline-flex cursor-pointer items-center gap-1 font-medium text-[#6B655E] hover:text-[#262626]"
-                        >
-                          {showTrans ? (
-                            <EyeOff className="h-3.5 w-3.5" />
-                          ) : (
-                            <Eye className="h-3.5 w-3.5" />
-                          )}
-                          {showTrans
-                            ? "Ẩn dịch tiếng Việt"
-                            : "Dịch tiếng Việt"}
-                        </button>
-                      </div>
+                    <div className="flex flex-wrap items-center justify-end gap-3 text-xs">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setShowSentencePinyin((prev) => ({
+                            ...prev,
+                            [sentence.id]: !showPy,
+                          }))
+                        }
+                        className="inline-flex cursor-pointer items-center gap-1 font-medium text-[#6B655E] hover:text-[#262626]"
+                      >
+                        <Languages className="h-3.5 w-3.5" />
+                        {showPy ? "Ẩn Pinyin" : "Hiện Pinyin"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setShowTranslations((prev) => ({
+                            ...prev,
+                            [sentence.id]: !showTrans,
+                          }))
+                        }
+                        className="inline-flex cursor-pointer items-center gap-1 font-medium text-[#6B655E] hover:text-[#262626]"
+                      >
+                        {showTrans ? (
+                          <EyeOff className="h-3.5 w-3.5" />
+                        ) : (
+                          <Eye className="h-3.5 w-3.5" />
+                        )}
+                        {showTrans
+                          ? "Ẩn dịch tiếng Việt"
+                          : "Dịch tiếng Việt"}
+                      </button>
                     </div>
 
                     {isRevealed && (
@@ -1189,87 +1190,7 @@ export default function ListeningPage() {
 
       {/* ==================== MODE 2: 4 TASK NGHE HIỂU CHUẨN HSK ==================== */}
       {mode === "tasks" && (
-        <div className="space-y-5">
-          {/* Independent HSK0..HSK9 + Sub-Difficulty Filter */}
-          <div className="space-y-3 rounded-2xl border border-[#E5E5E0] bg-white p-4">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-[#737373]">
-                Cấp độ:
-              </span>
-              {(["ALL", ...HSK_LEVELS] as const).map((lvl) => (
-                <button
-                  key={lvl}
-                  type="button"
-                  onClick={() => {
-                    stopSpeaking();
-                    setPlayingId(null);
-                    setTaskLevel(lvl);
-                  }}
-                  className={`cursor-pointer rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
-                    taskLevel === lvl
-                      ? "bg-brand-soft text-brand-active ring-1 ring-brand"
-                      : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-brand"
-                  }`}
-                >
-                  {getLevelDisplayLabel(lvl)}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#F2F2F0] pt-3">
-              <span className="text-xs font-semibold uppercase tracking-wider text-[#737373]">
-                Phân tầng câu hỏi:
-              </span>
-              <div className="inline-flex rounded-xl border border-[#E5E5E0] bg-[#FAF9F7] p-1">
-                {(
-                  [
-                    {
-                      id: "all" as const,
-                      label: "Tất cả",
-                      count: levelFilteredTasks.length,
-                    },
-                    {
-                      id: "basic" as const,
-                      label: "Cơ bản",
-                      count: basicTaskCount,
-                    },
-                    {
-                      id: "advanced" as const,
-                      label: "Nâng cao",
-                      count: advancedTaskCount,
-                    },
-                  ]
-                ).map((sub) => (
-                  <button
-                    key={sub.id}
-                    type="button"
-                    onClick={() => {
-                      stopSpeaking();
-                      setPlayingId(null);
-                      setTaskSubFilter(sub.id);
-                    }}
-                    className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
-                      taskSubFilter === sub.id
-                        ? "bg-white text-brand-active ring-1 ring-brand"
-                        : "text-[#4A4540] hover:text-[#262626]"
-                    }`}
-                  >
-                    <span>{sub.label}</span>
-                    <span
-                      className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
-                        taskSubFilter === sub.id
-                          ? "bg-brand-soft text-brand-active"
-                          : "bg-[#F2F2F0] text-[#737373]"
-                      }`}
-                    >
-                      {sub.count}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
+        <div className="space-y-4">
           {/* 4 Task Tabs */}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {taskTabs.map((tab) => {

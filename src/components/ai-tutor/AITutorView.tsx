@@ -369,11 +369,11 @@ export function AITutorView() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* Left: Title + Status Pill */}
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[#E5E5E0] bg-[#FFFFFF] text-xl">
-              <span>{activePersona.emoji}</span>
+            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[#E8D5C4] bg-gradient-to-br from-[#F6E4CE] to-[#E89D60] text-sm font-bold text-white shadow-xs">
+              <span>包</span>
               <span
-                className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#FFFFFF] bg-[#6B655E]"
-                title="Đang sẵn sàng"
+                className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#FFFFFF] bg-emerald-500"
+                title="BaoBao 3D đang sẵn sàng"
               />
             </div>
             <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -749,8 +749,8 @@ export function AITutorView() {
           <div className="flex-1 overflow-y-auto bg-[#F2F2F0]/40 px-4 py-5 sm:px-6">
             {messages.length === 0 ? (
               <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center py-4 text-center">
-                <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-3xl border border-[#E5E5E0] bg-[#FFFFFF] text-3xl">
-                  {activePersona.emoji}
+                <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-3xl border border-[#E8D5C4] bg-gradient-to-br from-[#FFF6EB] via-[#F5DEC2] to-[#E89D60] font-display text-2xl font-bold text-[#7C4B34] shadow-sm">
+                  包包
                 </div>
                 <h2 className="text-xl font-bold text-[#262626] sm:text-2xl">
                   你好！Bắt đầu luyện hội thoại tiếng Trung cùng BaoBao (包包)
@@ -824,8 +824,8 @@ export function AITutorView() {
                 {/* Typing Indicator */}
                 {isLoading && (
                   <div className="flex items-start gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-[#E5E5E0] bg-[#FFFFFF] text-lg">
-                      {activePersona.emoji}
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-[#E8D5C4] bg-gradient-to-br from-[#F6E4CE] to-[#E89D60] text-xs font-bold text-white">
+                      包
                     </div>
                     <div className="inline-flex items-center gap-2 rounded-2xl rounded-tl-md border border-[#E5E5E0] bg-[#FFFFFF] px-4 py-3">
                       <span className="text-xs font-medium text-[#737373]">

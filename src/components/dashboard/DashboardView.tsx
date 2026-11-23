@@ -216,7 +216,7 @@ export function DashboardView() {
       icon: Headphones,
     },
     {
-      href: "/vocab",
+      href: "/vocab?tab=mindmap",
       title: "Mind Map Từ vựng & Viết chữ",
       subtitle: `${savedVocabCount} từ đã lưu · Ô Mễ tự cách 米字格`,
       icon: Network,
@@ -262,14 +262,14 @@ export function DashboardView() {
         type: "vocab",
         title: "Ôn tập thẻ SRS & Viết chữ Hán",
         meta: `Từ vựng · ${savedVocabCount} từ trong sổ`,
-        href: "/vocab",
+        href: "/vocab?tab=srs",
       },
       {
         id: "vocab-mindmap",
         type: "vocab",
         title: "Mở rộng 15 chủ đề Mind Map HSK",
         meta: "Từ vựng · Chấm nét & Đặt 2 câu",
-        href: "/vocab",
+        href: "/vocab?tab=mindmap",
       },
     ];
 
@@ -295,44 +295,78 @@ export function DashboardView() {
             transition={SPRING_TRANSITION}
             className="rounded-3xl bg-[#262626] text-[#F2F2F0] p-6 sm:p-7 shadow-[0_8px_24px_-12px_rgba(38,38,38,0.35)]"
           >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+            <div className="flex flex-col justify-between gap-5">
               <div className="space-y-2 min-w-0">
                 <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-[11px] font-medium tracking-wide text-[#E5E5E0]">
                   <Sparkles className="h-3.5 w-3.5 text-[#D6D3CD]" />
                   <span>Lộ trình tiếng Trung HSK 0 → HSK 7–9</span>
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-[#F2F2F0]">
-                  你好, {greetingName}
+                  {user?.username
+                    ? `你好, ${greetingName}`
+                    : "Học Tiếng Trung HSK 0–9 Miễn Phí Cùng Gia Sư AI 3D"}
                 </h1>
-                <p className="text-sm text-[#D6D3CD] leading-relaxed">
-                  Bạn đã hoàn thành{" "}
-                  <span className="font-semibold text-white">
-                    {completedCount}/{totalSessions} buổi
-                  </span>
-                  . Tiếp tục giữ nhịp với{" "}
-                  <span className="font-medium text-[#F2F2F0]">{nextSession.title}</span>.
-                </p>
+                {completedCount === 0 ? (
+                  <p className="text-sm text-[#D6D3CD] leading-relaxed">
+                    Bắt đầu từ con số 0 với bài học Pinyin &amp; 4 thanh điệu, hoặc làm bài test 3 phút để xếp đúng trình độ HSK của bạn.
+                  </p>
+                ) : (
+                  <p className="text-sm text-[#D6D3CD] leading-relaxed">
+                    Bạn đã hoàn thành{" "}
+                    <span className="font-semibold text-white">
+                      {completedCount}/{totalSessions} buổi
+                    </span>
+                    . Tiếp tục giữ nhịp với{" "}
+                    <span className="font-medium text-[#F2F2F0]">{nextSession.title}</span>.
+                  </p>
+                )}
               </div>
 
-              <div className="shrink-0">
-                <Link href={`/study/${nextSession.id}`}>
-                  <motion.div
-                    whileHover={{ y: -2 }}
-                    whileTap={{ scale: 0.97 }}
-                    transition={SPRING_TRANSITION}
-                    className="inline-flex items-center justify-center gap-2 rounded-full bg-[#F2F2F0] text-[#262626] px-5 py-3 text-sm font-semibold hover:bg-white transition-colors w-full sm:w-auto"
-                  >
-                    <span>Học tiếp bài hôm nay</span>
-                    <ArrowRight className="h-4 w-4" />
-                  </motion.div>
-                </Link>
-              </div>
+              {completedCount === 0 ? (
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                  <Link href="/study/hsk0-l1-tones" className="w-full sm:w-auto">
+                    <motion.div
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.97 }}
+                      transition={SPRING_TRANSITION}
+                      className="inline-flex items-center justify-center gap-2 rounded-full bg-brand text-white px-5 py-3 text-sm font-semibold hover:bg-brand-hover transition-colors w-full sm:w-auto shadow-sm"
+                    >
+                      <span>Bắt đầu ngay Bài 1 (Mức 0)</span>
+                      <ArrowRight className="h-4 w-4" />
+                    </motion.div>
+                  </Link>
+                  <Link href="/placement-test" className="w-full sm:w-auto">
+                    <motion.div
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.97 }}
+                      transition={SPRING_TRANSITION}
+                      className="inline-flex items-center justify-center gap-2 rounded-full border border-white/20 bg-white/10 text-[#F2F2F0] px-5 py-3 text-sm font-semibold hover:bg-white/20 transition-colors w-full sm:w-auto"
+                    >
+                      <span>Test xếp lớp HSK (3 phút)</span>
+                    </motion.div>
+                  </Link>
+                </div>
+              ) : (
+                <div className="shrink-0">
+                  <Link href={`/study/${nextSession.id}`}>
+                    <motion.div
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.97 }}
+                      transition={SPRING_TRANSITION}
+                      className="inline-flex items-center justify-center gap-2 rounded-full bg-[#F2F2F0] text-[#262626] px-5 py-3 text-sm font-semibold hover:bg-white transition-colors w-full sm:w-auto"
+                    >
+                      <span>Học tiếp bài hôm nay</span>
+                      <ArrowRight className="h-4 w-4" />
+                    </motion.div>
+                  </Link>
+                </div>
+              )}
             </div>
           </motion.section>
 
           {/* 2. Middle Row (3 equal Bento cards) */}
           <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Card 1: Gia sư AI BaoBao & Minh/Linh 3D Live Call */}
+            {/* Card 1: Gia sư AI Capybara BaoBao 3D Live Voice Call */}
             <motion.div
               whileHover={{ y: -3 }}
               transition={SPRING_TRANSITION}
@@ -343,27 +377,26 @@ export function DashboardView() {
                   <span className="text-xs font-semibold uppercase tracking-wider text-[#6B655E]">
                     Gia sư AI BaoBao (包包)
                   </span>
-                  <PhoneCall className="h-4 w-4 text-[#6B655E]" />
+                  <PhoneCall className="h-4 w-4 text-[#E89D60]" />
                 </div>
 
-                {/* Mini Minh Long & Bảo Linh badges */}
-                <div className="flex items-center gap-2">
-                  <div className="inline-flex items-center gap-1.5 rounded-full border border-[#E5E5E0] bg-[#F2F2F0] px-2.5 py-1">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#262626] text-[10px] font-bold text-[#F2F2F0]">
-                      明
+                {/* BaoBao 3D Capybara badges */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="inline-flex items-center gap-1.5 rounded-full border border-[#E8D5C4] bg-[#FDF6EE] px-2.5 py-1">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#E89D60] text-[10px] font-bold text-white">
+                      包
                     </span>
-                    <span className="text-xs font-semibold text-[#262626]">Minh Long</span>
+                    <span className="text-xs font-semibold text-[#2D221C]">BaoBao 3D</span>
                   </div>
                   <div className="inline-flex items-center gap-1.5 rounded-full border border-[#E5E5E0] bg-[#F2F2F0] px-2.5 py-1">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#6B655E] text-[10px] font-bold text-white">
-                      宝
+                    <span className="text-[11px] font-semibold text-[#5C473A]">
+                      Capybara · VI ↔ ZH
                     </span>
-                    <span className="text-xs font-semibold text-[#262626]">Bảo Linh</span>
                   </div>
                 </div>
 
                 <p className="text-xs text-[#6B655E] leading-relaxed">
-                  Luyện phản xạ nói tiếng Trung &amp; chấm 4 thanh điệu trực tiếp cùng gia sư AI 3D.
+                  Gọi thoại song ngữ Việt – Trung tự do cùng Capybara BaoBao 3D, phản xạ khẩu ngữ tự nhiên.
                 </p>
               </div>
 
@@ -372,7 +405,7 @@ export function DashboardView() {
                   whileTap={{ scale: 0.97 }}
                   className="inline-flex w-full items-center justify-between rounded-full border border-[#E5E5E0] bg-[#F2F2F0] px-4 py-2 text-xs font-semibold text-[#262626] hover:border-[#6B655E] hover:bg-[#262626] hover:text-[#F2F2F0] transition-colors"
                 >
-                  <span>Gọi trực tiếp ngay</span>
+                  <span>Gọi BaoBao ngay</span>
                   <ArrowRight className="h-3.5 w-3.5" />
                 </motion.div>
               </Link>
@@ -591,7 +624,7 @@ export function DashboardView() {
                     <span className="text-2xl font-bold text-white">{srsDueCount}</span>
                     <span className="text-xs text-[#D6D3CD]">thẻ đến hạn</span>
                   </div>
-                  <Link href="/vocab">
+                  <Link href="/vocab?tab=srs">
                     <motion.span
                       whileTap={{ scale: 0.97 }}
                       className="inline-flex items-center gap-1.5 rounded-full bg-[#F2F2F0] px-4 py-1.5 text-xs font-semibold text-[#262626] hover:bg-white transition-colors"
@@ -727,72 +760,130 @@ export function DashboardView() {
             })}
           </section>
 
-          {/* 3. Hoạt động gần đây (Activity Feed) */}
-          <section className="rounded-3xl border border-[#E5E5E0] bg-white p-5 space-y-4">
-            <div className="space-y-3">
-              <h2 className="text-sm font-semibold text-[#262626]">
-                Hoạt động gần đây
-              </h2>
-
-              {/* Filter tabs with layoutId */}
-              <div className="inline-flex w-full rounded-full border border-[#E5E5E0] bg-[#F2F2F0] p-0.5">
-                {(
-                  [
-                    { id: "all", label: "Tất cả" },
-                    { id: "lesson", label: "Bài học" },
-                    { id: "vocab", label: "Từ vựng" },
-                  ] as const
-                ).map((tab) => {
-                  const active = activityFilter === tab.id;
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setActivityFilter(tab.id)}
-                      className={`relative flex-1 rounded-full py-1.5 text-xs font-medium transition-colors cursor-pointer ${
-                        active ? "text-[#F2F2F0]" : "text-[#6B655E] hover:text-[#262626]"
-                      }`}
-                    >
-                      {active && (
-                        <motion.span
-                          layoutId="activityFilterPill"
-                          transition={SPRING_TRANSITION}
-                          className="absolute inset-0 rounded-full bg-[#262626]"
-                        />
-                      )}
-                      <span className="relative z-10">{tab.label}</span>
-                    </button>
-                  );
-                })}
+          {/* 3. Onboarding Card (new users) OR Hoạt động gần đây */}
+          {completedCount === 0 ? (
+            <section className="rounded-3xl border border-[#E5E5E0] bg-white p-5 space-y-4">
+              <div>
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-brand">
+                  Dành cho người mới
+                </span>
+                <h2 className="mt-0.5 text-sm font-semibold text-[#262626]">
+                  3 bước bắt đầu nhanh
+                </h2>
               </div>
-            </div>
 
-            <div className="divide-y divide-[#E5E5E0]">
-              {filteredActivities.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between gap-3 py-3 first:pt-1 last:pb-0"
-                >
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-[#262626] truncate">
-                      {item.title}
-                    </p>
-                    <p className="mt-0.5 text-[11px] text-[#6B655E] truncate">
-                      {item.meta}
-                    </p>
-                  </div>
-                  <Link href={item.href} className="shrink-0">
-                    <motion.span
-                      whileTap={{ scale: 0.97 }}
-                      className="inline-flex items-center rounded-full border border-[#E5E5E0] bg-[#F2F2F0] px-3 py-1 text-[11px] font-semibold text-[#262626] hover:bg-[#262626] hover:text-[#F2F2F0] hover:border-[#262626] transition-colors"
+              <div className="space-y-2.5">
+                {[
+                  {
+                    step: 1,
+                    title: "Làm bài 1 thanh điệu",
+                    desc: "Nắm vững Pinyin & 4 thanh điệu cơ bản",
+                    href: "/study/hsk0-l1-tones",
+                  },
+                  {
+                    step: 2,
+                    title: "Nói chuyện với BaoBao AI",
+                    desc: "Luyện phản xạ song ngữ Việt – Trung 3D",
+                    href: "/ai-tutor",
+                  },
+                  {
+                    step: 3,
+                    title: "Học từ vựng SRS",
+                    desc: "Ghi nhớ chữ Hán bằng Flashcard 3D",
+                    href: "/vocab?tab=srs",
+                  },
+                ].map((item) => (
+                  <Link key={item.step} href={item.href} className="block group">
+                    <motion.div
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.98 }}
+                      transition={SPRING_TRANSITION}
+                      className="flex items-center gap-3 rounded-2xl border border-[#E5E5E0] bg-[#FAF9F7] p-3 transition-colors group-hover:border-brand/50 group-hover:bg-brand-soft/40"
                     >
-                      Mở lại
-                    </motion.span>
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#262626] text-xs font-bold text-white group-hover:bg-brand transition-colors">
+                        {item.step}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold text-[#262626] truncate">
+                          {item.title}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-[#6B655E] truncate">
+                          {item.desc}
+                        </p>
+                      </div>
+                      <ArrowRight className="h-3.5 w-3.5 shrink-0 text-[#6B655E] group-hover:text-brand transition-colors" />
+                    </motion.div>
                   </Link>
+                ))}
+              </div>
+            </section>
+          ) : (
+            <section className="rounded-3xl border border-[#E5E5E0] bg-white p-5 space-y-4">
+              <div className="space-y-3">
+                <h2 className="text-sm font-semibold text-[#262626]">
+                  Hoạt động gần đây
+                </h2>
+
+                {/* Filter tabs with layoutId */}
+                <div className="inline-flex w-full rounded-full border border-[#E5E5E0] bg-[#F2F2F0] p-0.5">
+                  {(
+                    [
+                      { id: "all", label: "Tất cả" },
+                      { id: "lesson", label: "Bài học" },
+                      { id: "vocab", label: "Từ vựng" },
+                    ] as const
+                  ).map((tab) => {
+                    const active = activityFilter === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setActivityFilter(tab.id)}
+                        className={`relative flex-1 rounded-full py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+                          active ? "text-[#F2F2F0]" : "text-[#6B655E] hover:text-[#262626]"
+                        }`}
+                      >
+                        {active && (
+                          <motion.span
+                            layoutId="activityFilterPill"
+                            transition={SPRING_TRANSITION}
+                            className="absolute inset-0 rounded-full bg-[#262626]"
+                          />
+                        )}
+                        <span className="relative z-10">{tab.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
-          </section>
+              </div>
+
+              <div className="divide-y divide-[#E5E5E0]">
+                {filteredActivities.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-3 py-3 first:pt-1 last:pb-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-[#262626] truncate">
+                        {item.title}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-[#6B655E] truncate">
+                        {item.meta}
+                      </p>
+                    </div>
+                    <Link href={item.href} className="shrink-0">
+                      <motion.span
+                        whileTap={{ scale: 0.97 }}
+                        className="inline-flex items-center rounded-full border border-[#E5E5E0] bg-[#F2F2F0] px-3 py-1 text-[11px] font-semibold text-[#262626] hover:bg-[#262626] hover:text-[#F2F2F0] hover:border-[#262626] transition-colors"
+                      >
+                        Mở lại
+                      </motion.span>
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       </div>
     </div>

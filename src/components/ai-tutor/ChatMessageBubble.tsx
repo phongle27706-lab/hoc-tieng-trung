@@ -108,12 +108,12 @@ export function ChatMessageBubble({
 
   return (
     <div className="flex items-start gap-2.5 sm:gap-3">
-      {/* Expressive Persona Avatar */}
+      {/* BaoBao Capybara Avatar */}
       <div
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-[#E5E5E0] bg-[#F2F2F0] text-lg"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-[#E8D5C4] bg-gradient-to-br from-[#F6E4CE] to-[#E89D60] text-xs font-bold text-white shadow-xs"
         title={`Gia sư BaoBao (${personaCfg.label})`}
       >
-        {personaCfg.emoji}
+        包
       </div>
 
       <div className="min-w-0 max-w-[88%] flex-1 sm:max-w-[80%]">

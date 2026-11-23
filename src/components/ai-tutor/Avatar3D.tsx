@@ -12,7 +12,7 @@ const CapybaraScene = dynamic(() => import("@/components/ai-tutor/three/Capybara
   ssr: false,
   loading: () => (
     <div className="flex h-full w-full items-center justify-center">
-      <div className="h-1/3 w-1/3 animate-pulse rounded-full bg-[#E59A5C]/40" />
+      <div className="h-28 w-28 animate-pulse rounded-full bg-[#E89D60]/35 ring-4 ring-[#F5E6D3]" />
     </div>
   ),
 });

@@ -20,6 +20,7 @@ import {
 } from "@/data/chinese/speaking";
 import { InteractiveChineseText } from "@/components/dictionary/InteractiveChineseText";
 import { ResourceBanner } from "@/components/resources/ResourceBanner";
+import { UnifiedFilterBar } from "@/components/ui/UnifiedFilterBar";
 import { getResourcesByCategory } from "@/data/resources";
 import {
   createChineseRecognizer,
@@ -331,125 +332,81 @@ export default function SpeakingPage() {
       : null;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 pb-12">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-[#6B655E]">
-            <Mic className="h-5 w-5" />
-            <span className="text-xs font-semibold uppercase tracking-wider">
-              口语 · Luyện Nói &amp; Phát âm Shadowing (Mức 0 → HSK 9)
-            </span>
-          </div>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-[#262626] sm:text-3xl">
-            Luyện Phát Âm Thanh Điệu &amp; Shadowing
+    <div className="mx-auto max-w-5xl space-y-4 pb-12">
+      {/* Compact Header */}
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Mic className="h-4 w-4 text-brand" />
+          <h1 className="text-lg font-bold tracking-tight text-[#262626] sm:text-xl">
+            Luyện Nói &amp; Shadowing
           </h1>
-          <p className="mt-1 text-sm text-[#737373]">
-            Nghe mẫu tiếng Phổ thông chuẩn (1.0x / 0.75x), thu âm Micro chấm điểm từng chữ Hán và sửa lỗi âm bật hơi, âm cuốn lưỡi.
-          </p>
+          <span className="hidden text-xs font-medium text-[#737373] sm:inline">
+            口语 · zh-CN
+          </span>
         </div>
-
-        <button
-          type="button"
-          onClick={() => setShowPinyin((prev) => !prev)}
-          className={`inline-flex cursor-pointer items-center gap-1.5 self-start rounded-xl border px-3.5 py-2 text-xs font-semibold transition-colors sm:self-auto ${
-            showPinyin
-              ? "border-[#292524] bg-[#292524] text-white"
-              : "border-[#E5E5E0] bg-white text-[#4A4540] hover:border-[#6B655E]"
-          }`}
-        >
-          <Languages className="h-4 w-4" />
-          {showPinyin ? "Đang hiện Pinyin" : "Hiện Pinyin"}
-        </button>
+        <span className="text-xs text-[#737373]">
+          Nghe mẫu 1.0x / 0.75x &amp; chấm điểm từng chữ Hán
+        </span>
       </div>
 
-      {/* HSK0 -> HSK9 Level Filter */}
-      <div className="space-y-3 rounded-2xl border border-[#E5E5E0] bg-white p-4">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-[#737373]">
-            Cấp độ:
+      {/* Unified Single-Row Filter & Settings Bar */}
+      <UnifiedFilterBar
+        hskLevel={selectedLevel}
+        onHskLevelChange={(lvl) =>
+          handleLevelChange(lvl as "ALL" | HSKLevel | "HSK7-9")
+        }
+        allowAllLevel
+        difficulty={selectedSubFilter}
+        onDifficultyChange={(val) =>
+          handleSubFilterChange(val as "all" | SubDifficulty)
+        }
+        difficultyOptions={[
+          {
+            value: "all",
+            label: `Tất cả mức (${levelSentences.length})`,
+            shortLabel: "Độ khó",
+          },
+          {
+            value: "basic",
+            label: `Cơ bản (${basicCount})`,
+            shortLabel: "Cơ bản",
+          },
+          {
+            value: "advanced",
+            label: `Nâng cao (${advancedCount})`,
+            shortLabel: "Nâng cao",
+          },
+        ]}
+        rightSlot={
+          <span className="whitespace-nowrap text-[11px] font-medium text-[#737373]">
+            {filteredSentences.length} câu
           </span>
-          {HSK_LEVELS.map((lvl) => (
+        }
+        settingsBadge={showPinyin ? "Pinyin" : undefined}
+        settingsAriaLabel="Cài đặt luyện nói"
+        settingsContent={
+          <label className="flex cursor-pointer items-center justify-between text-xs font-semibold text-[#4A4540]">
+            <span className="inline-flex items-center gap-1.5">
+              <Languages className="h-3.5 w-3.5" /> Hiện phiên âm Pinyin
+            </span>
             <button
-              key={lvl}
               type="button"
-              onClick={() => handleLevelChange(lvl)}
-              className={`cursor-pointer rounded-xl px-3 py-1.5 text-xs font-semibold transition-all ${
-                selectedLevel === lvl
-                  ? "bg-[#292524] text-white"
-                  : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#4A4540] hover:border-[#6B655E]"
+              role="switch"
+              aria-checked={showPinyin}
+              onClick={() => setShowPinyin((prev) => !prev)}
+              className={`relative h-5 w-9 cursor-pointer rounded-full transition-colors ${
+                showPinyin ? "bg-brand" : "bg-[#D6D3CD]"
               }`}
             >
-              {lvl === "ALL"
-                ? "Tất cả"
-                : lvl === "HSK0"
-                  ? "Mức 0"
-                  : lvl === "HSK7-9"
-                    ? "HSK 7–9"
-                    : lvl.replace("HSK", "HSK ")}
-            </button>
-          ))}
-        </div>
-
-        {/* Sub-Level Filter: Tất cả | Cơ bản | Nâng cao */}
-        <div className="grid grid-cols-1 gap-2 pt-1 sm:grid-cols-3">
-          {(
-            [
-              {
-                id: "all" as const,
-                label:
-                  selectedLevel === "ALL"
-                    ? "Tất cả trình độ"
-                    : `${selectedLevel} · Tất cả`,
-                count: levelSentences.length,
-              },
-              {
-                id: "basic" as const,
-                label:
-                  selectedLevel === "ALL"
-                    ? "Cơ bản (Basic)"
-                    : `${selectedLevel} · Cơ bản`,
-                count: basicCount,
-              },
-              {
-                id: "advanced" as const,
-                label:
-                  selectedLevel === "ALL"
-                    ? "Nâng cao (Advanced)"
-                    : `${selectedLevel} · Nâng cao`,
-                count: advancedCount,
-              },
-            ]
-          ).map((sub) => {
-            const active = selectedSubFilter === sub.id;
-            return (
-              <button
-                key={sub.id}
-                type="button"
-                onClick={() => handleSubFilterChange(sub.id)}
-                className={`flex cursor-pointer items-center justify-between gap-2 rounded-xl px-4 py-2.5 text-left transition-all ${
-                  active
-                    ? "bg-[#6B655E] text-white shadow-xs"
-                    : "border border-[#E5E5E0] bg-[#FAF9F7] text-[#57534E] hover:bg-[#F2F2F0] hover:text-[#262626]"
+              <span
+                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${
+                  showPinyin ? "left-[18px]" : "left-0.5"
                 }`}
-              >
-                <span className="text-xs font-semibold sm:text-sm">
-                  {sub.label}
-                </span>
-                <span
-                  className={`rounded-lg px-2 py-0.5 text-[11px] font-medium ${
-                    active
-                      ? "bg-white/15 text-[#F5F5F4]"
-                      : "bg-white text-[#737373]"
-                  }`}
-                >
-                  {sub.count} câu
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+              />
+            </button>
+          </label>
+        }
+      />
 
       {/* Unsupported Browser Notice */}
       {!supported && (

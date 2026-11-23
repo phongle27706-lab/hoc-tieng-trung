@@ -1,4 +1,9 @@
+import type { Metadata } from "next";
 import { DashboardView } from "@/components/dashboard/DashboardView";
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+};
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||

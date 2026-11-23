@@ -443,7 +443,55 @@ function generateRawMock(
   if (/(你好|您好|嗨|早上好|晚上好|xin chào|chào)/i.test(lower)) {
     const zh = "你好呀！今天过得怎么样？想聊点什么呢？";
     const py = "Nǐ hǎo ya! Jīntiān guò de zěnmeyàng? Xiǎng liáo diǎn shénme ne?";
-    const vi = "Chào bạn nha! Hôm nay thế nào? Muốn tán gẫu gì nè?";
+    const vi =
+      "Chào bạn nha! Nếu muốn chào thật tự nhiên bằng tiếng Trung, bạn nói là 你好呀！今天过得怎么样？ Hôm nay của bạn thế nào rồi?";
+    return wrapPersonaTone(persona, zh, py, vi, false);
+  }
+
+  // Detect Vietnamese input (no Hanzi characters) -> reply naturally in Vietnamese + suggest 1 short Chinese sentence
+  const hasHanzi = /\p{Script=Han}/u.test(text);
+  if (!hasHanzi && /[\p{Script=Latin}]/u.test(text)) {
+    if (/(ăn|cơm|đói|trà sữa|cà phê|uống|ngon)/i.test(lower)) {
+      const zh = "我今天想喝奶茶呢，你喜欢喝什么呀？";
+      const py = "Wǒ jīntiān xiǎng hē nǎichá ne, nǐ xǐhuan hē shénme ya?";
+      const vi =
+        "Nghe hấp dẫn quá ha! Câu này nói tiếng Trung siêu tự nhiên là: 我今天想喝奶茶呢，你喜欢喝什么呀？ Bạn thích món nào nhất?";
+      return wrapPersonaTone(persona, zh, py, vi, false);
+    }
+    if (/(mệt|bận|làm việc|công việc|đi làm|học)/i.test(lower)) {
+      const zh = "最近挺忙吧？辛苦啦！晚上你想休息一下吗？";
+      const py = "Zuìjìn tǐng máng ba? Xīnkǔ la! Wǎnshang nǐ xiǎng xiūxi yíxià ma?";
+      const vi =
+        "Thương ghê, dạo này bạn bận lắm hả? Trong tiếng Trung mình có thể nói: 最近挺忙吧？辛苦啦！ Tối nay bạn tính nghỉ ngơi làm gì nè?";
+      return wrapPersonaTone(persona, zh, py, vi, false);
+    }
+    if (/(tên|giới thiệu|là ai|ở đâu|việt nam)/i.test(lower)) {
+      const zh = "我是越南人，很高兴认识你呀！你叫什么名字呢？";
+      const py = "Wǒ shì Yuènánrén, hěn gāoxìng rènshi nǐ ya! Nǐ jiào shénme míngzi ne?";
+      const vi =
+        "Chuẩn rồi đó! Để giới thiệu bản thân bằng tiếng Trung, bạn thử nói câu này nhé: 我是越南人，很高兴认识你呀！ Bạn muốn tập giới thiệu thêm nghề nghiệp không?";
+      return wrapPersonaTone(persona, zh, py, vi, false);
+    }
+    if (/(cảm ơn|thanks|thank)/i.test(lower)) {
+      const zh = "不客气嘛！我们继续聊聊吧，你还想学哪句呢？";
+      const py = "Bú kèqi ma! Wǒmen jìxù liáoliao ba, nǐ hái xiǎng xué nǎ jù ne?";
+      const vi =
+        "Không có chi nè! Tiếng Trung mình đáp nhẹ nhàng là: 不客气嘛！ Bạn còn muốn tập nói câu nào tiếp theo không?";
+      return wrapPersonaTone(persona, zh, py, vi, false);
+    }
+
+    const zh =
+      levelLimit === "HSK1"
+        ? "真的吗？听起来不错呀！你平时喜欢做什么呢？"
+        : "原来如此呀！我也这么觉得呢。那你接下来打算怎么办呀？";
+    const py =
+      levelLimit === "HSK1"
+        ? "Zhēn de ma? Tīng qǐlái búcuò ya! Nǐ píngshí xǐhuan zuò shénme ne?"
+        : "Yuánlái rúcǐ ya! Wǒ yě zhème juéde ne. Nà nǐ jiēxiàlái dǎsuàn zěnme bàn ya?";
+    const vi =
+      levelLimit === "HSK1"
+        ? `Mình hiểu ý bạn rồi nè! Bạn có thể đáp bằng tiếng Trung là: 真的吗？听起来不错呀！ Bạn thử nói lại câu đó hoặc kể thêm cho BaoBao nghe nhé?`
+        : `Ồ, ra là vậy à! Nói bằng tiếng Trung tự nhiên sẽ là: 原来如此呀！我也这么觉得呢。 Thế tiếp theo bạn tính sao nè?`;
     return wrapPersonaTone(persona, zh, py, vi, false);
   }
 

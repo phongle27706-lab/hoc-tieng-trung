@@ -343,7 +343,7 @@ export function PersonalizationPanel({
                   <span
                     className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
                       isSelected
-                        ? "bg-white/15 text-white"
+                        ? "bg-white text-brand-active ring-1 ring-brand-ring"
                         : "bg-[#E5E5E0] text-[#4A4540]"
                     }`}
                   >
@@ -352,7 +352,7 @@ export function PersonalizationPanel({
                 </div>
                 <p
                   className={`mt-1 text-xs leading-relaxed ${
-                    isSelected ? "text-[#E5E5E0]" : "text-[#6B655E]"
+                    isSelected ? "text-[#4A4540]" : "text-[#6B655E]"
                   }`}
                 >
                   {hsk0.descVi}
